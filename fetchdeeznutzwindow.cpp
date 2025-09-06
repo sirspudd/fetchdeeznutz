@@ -1,4 +1,4 @@
-#include "deeznutzwindow.h"
+#include "fetchdeeznutzwindow.h"
 
 RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
     : QDialog(parent)
@@ -6,13 +6,13 @@ RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
     setWindowTitle(repo.name.isEmpty() ? "Add Repository" : "Edit Repository");
     setModal(true);
     resize(500, 500);
-    
+
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
-    
+
     // Basic repository info
     QGroupBox *basicGroup = new QGroupBox("Repository Information");
     QFormLayout *basicLayout = new QFormLayout(basicGroup);
-    
+
     nameEdit = new QLineEdit(repo.name);
     pathEdit = new QLineEdit(repo.localPath);
     branchEdit = new QLineEdit(repo.branch.isEmpty() ? "main" : repo.branch);
@@ -22,61 +22,61 @@ RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
     intervalSpinBox->setSuffix(" minutes");
     enabledCheckBox = new QCheckBox();
     enabledCheckBox->setChecked(repo.enabled);
-    
+
     basicLayout->addRow("Name:", nameEdit);
     basicLayout->addRow("Local Path:", pathEdit);
     basicLayout->addRow("Branch:", branchEdit);
     basicLayout->addRow("Fetch Interval:", intervalSpinBox);
     basicLayout->addRow("Enabled:", enabledCheckBox);
-    
+
     mainLayout->addWidget(basicGroup);
-    
+
     // Remotes section
     QGroupBox *remotesGroup = new QGroupBox("Remotes");
     QVBoxLayout *remotesLayout = new QVBoxLayout(remotesGroup);
-    
+
     remotesList = new QListWidget();
     remotesList->setSelectionMode(QAbstractItemView::SingleSelection);
     connect(remotesList, &QListWidget::itemSelectionChanged, this, &RepositoryDialog::onRemoteSelectionChanged);
     remotesLayout->addWidget(remotesList);
-    
+
     // Remote controls
     QHBoxLayout *remoteControlsLayout = new QHBoxLayout();
     addRemoteButton = new QPushButton("Add Remote");
     removeRemoteButton = new QPushButton("Remove Remote");
     removeRemoteButton->setEnabled(false);
-    
+
     connect(addRemoteButton, &QPushButton::clicked, this, &RepositoryDialog::addRemote);
     connect(removeRemoteButton, &QPushButton::clicked, this, &RepositoryDialog::removeRemote);
-    
+
     remoteControlsLayout->addWidget(addRemoteButton);
     remoteControlsLayout->addWidget(removeRemoteButton);
     remoteControlsLayout->addStretch();
-    
+
     remotesLayout->addLayout(remoteControlsLayout);
-    
+
     // Remote input fields
     QFormLayout *remoteInputLayout = new QFormLayout();
     remoteNameEdit = new QLineEdit();
     remoteUrlEdit = new QLineEdit();
     remoteInputLayout->addRow("Remote Name:", remoteNameEdit);
     remoteInputLayout->addRow("Remote URL:", remoteUrlEdit);
-    
+
     remotesLayout->addLayout(remoteInputLayout);
-    
+
     mainLayout->addWidget(remotesGroup);
-    
+
     // Load existing remotes
     for (const GitRemote& remote : repo.remotes) {
         QString itemText = QString("%1 - %2").arg(remote.name, remote.url);
         remotesList->addItem(itemText);
     }
-    
+
     // Dialog buttons
     QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    
+
     mainLayout->addWidget(buttonBox);
 }
 
@@ -88,7 +88,7 @@ GitRepository RepositoryDialog::getRepository() const
     repo.branch = branchEdit->text().trimmed();
     repo.fetchInterval = intervalSpinBox->value();
     repo.enabled = enabledCheckBox->isChecked();
-    
+
     // Get remotes from the list
     for (int i = 0; i < remotesList->count(); ++i) {
         QString itemText = remotesList->item(i)->text();
@@ -101,7 +101,7 @@ GitRepository RepositoryDialog::getRepository() const
             repo.remotes.append(remote);
         }
     }
-    
+
     return repo;
 }
 
@@ -109,12 +109,12 @@ void RepositoryDialog::addRemote()
 {
     QString name = remoteNameEdit->text().trimmed();
     QString url = remoteUrlEdit->text().trimmed();
-    
+
     if (name.isEmpty() || url.isEmpty()) {
         QMessageBox::warning(this, "Invalid Remote", "Remote name and URL are required.");
         return;
     }
-    
+
     // Check if remote name already exists
     for (int i = 0; i < remotesList->count(); ++i) {
         QString itemText = remotesList->item(i)->text();
@@ -123,10 +123,10 @@ void RepositoryDialog::addRemote()
             return;
         }
     }
-    
+
     QString itemText = QString("%1 - %2").arg(name, url);
     remotesList->addItem(itemText);
-    
+
     remoteNameEdit->clear();
     remoteUrlEdit->clear();
 }
@@ -145,7 +145,7 @@ void RepositoryDialog::onRemoteSelectionChanged()
     removeRemoteButton->setEnabled(hasSelection);
 }
 
-MainWindow::MainWindow(QWidget *parent)
+FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     : QMainWindow(parent)
     , fetchTimer(new QTimer(this))
     , currentFetchIndex(-1)
@@ -153,49 +153,49 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setWindowTitle("Git Repository Fetcher");
     setMinimumSize(800, 600);
-    
+
     setupUI();
     loadRepositories();
     updateRepositoryTree();
-    
+
     // Connect timer for scheduled fetching
-    connect(fetchTimer, &QTimer::timeout, this, &MainWindow::performScheduledFetch);
-    
+    connect(fetchTimer, &QTimer::timeout, this, &FetchDeeznutzWindow::performScheduledFetch);
+
     // Initialize libgit2
     git_libgit2_init();
-    
+
     // Start with a 1-minute timer
     fetchTimer->start(60000); // 60 seconds
 }
 
-MainWindow::~MainWindow()
+FetchDeeznutzWindow::~FetchDeeznutzWindow()
 {
     saveRepositories();
     git_libgit2_shutdown();
 }
 
-void MainWindow::setupUI()
+void FetchDeeznutzWindow::setupUI()
 {
     QWidget *centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
-    
+
     QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
-    
+
     // Left panel - Repository list and controls
     QVBoxLayout *leftLayout = new QVBoxLayout();
-    
+
     // Repository list
     QGroupBox *repoGroup = new QGroupBox("Repositories");
     QVBoxLayout *repoLayout = new QVBoxLayout(repoGroup);
-    
+
     repositoryTree = new QTreeWidget();
     repositoryTree->setSelectionMode(QAbstractItemView::SingleSelection);
     repositoryTree->setHeaderLabel("Repositories");
     repositoryTree->setRootIsDecorated(true);
     repositoryTree->setAlternatingRowColors(true);
-    connect(repositoryTree, &QTreeWidget::itemSelectionChanged, this, &MainWindow::onRepositorySelectionChanged);
+    connect(repositoryTree, &QTreeWidget::itemSelectionChanged, this, &FetchDeeznutzWindow::onRepositorySelectionChanged);
     repoLayout->addWidget(repositoryTree);
-    
+
     // Repository control buttons
     QHBoxLayout *repoButtonLayout = new QHBoxLayout();
     addButton = new QPushButton("Add Repo");
@@ -203,63 +203,63 @@ void MainWindow::setupUI()
     editButton = new QPushButton("Edit");
     removeButton = new QPushButton("Remove");
     fetchSelectedButton = new QPushButton("Fetch Selected");
-    
-    connect(addButton, &QPushButton::clicked, this, &MainWindow::addRepository);
-    connect(addDirectoryButton, &QPushButton::clicked, this, &MainWindow::addDirectory);
-    connect(editButton, &QPushButton::clicked, this, &MainWindow::editRepository);
-    connect(removeButton, &QPushButton::clicked, this, &MainWindow::removeRepository);
-    connect(fetchSelectedButton, &QPushButton::clicked, this, &MainWindow::fetchSelected);
-    
+
+    connect(addButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::addRepository);
+    connect(addDirectoryButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::addDirectory);
+    connect(editButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::editRepository);
+    connect(removeButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::removeRepository);
+    connect(fetchSelectedButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::fetchSelected);
+
     repoButtonLayout->addWidget(addButton);
     repoButtonLayout->addWidget(addDirectoryButton);
     repoButtonLayout->addWidget(editButton);
     repoButtonLayout->addWidget(removeButton);
     repoButtonLayout->addWidget(fetchSelectedButton);
-    
+
     repoLayout->addLayout(repoButtonLayout);
     leftLayout->addWidget(repoGroup);
-    
+
     // Global controls
     settingsGroup = new QGroupBox("Settings");
     QFormLayout *settingsLayout = new QFormLayout(settingsGroup);
-    
+
     globalIntervalSpinBox = new QSpinBox();
     globalIntervalSpinBox->setRange(1, 1440);
     globalIntervalSpinBox->setValue(60);
     globalIntervalSpinBox->setSuffix(" minutes");
-    connect(globalIntervalSpinBox, &QSpinBox::valueChanged, this, &MainWindow::onFetchIntervalChanged);
-    
+    connect(globalIntervalSpinBox, &QSpinBox::valueChanged, this, &FetchDeeznutzWindow::onFetchIntervalChanged);
+
     autoFetchCheckBox = new QCheckBox("Enable Auto Fetch");
     autoFetchCheckBox->setChecked(true);
-    connect(autoFetchCheckBox, &QCheckBox::toggled, this, &MainWindow::onAutoFetchToggled);
-    
+    connect(autoFetchCheckBox, &QCheckBox::toggled, this, &FetchDeeznutzWindow::onAutoFetchToggled);
+
     fetchAllButton = new QPushButton("Fetch All Now");
-    connect(fetchAllButton, &QPushButton::clicked, this, &MainWindow::fetchAll);
-    
+    connect(fetchAllButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::fetchAll);
+
     settingsLayout->addRow("Global Interval:", globalIntervalSpinBox);
     settingsLayout->addRow("", autoFetchCheckBox);
     settingsLayout->addRow("", fetchAllButton);
-    
+
     leftLayout->addWidget(settingsGroup);
     leftLayout->addStretch();
-    
+
     // Right panel - Log
     QGroupBox *logGroup = new QGroupBox("Activity Log");
     QVBoxLayout *logLayout = new QVBoxLayout(logGroup);
-    
+
     logTextEdit = new QTextEdit();
     logTextEdit->setReadOnly(true);
     logTextEdit->document()->setMaximumBlockCount(1000); // Limit log size
     logLayout->addWidget(logTextEdit);
-    
+
     mainLayout->addLayout(leftLayout, 1);
     mainLayout->addWidget(logGroup, 1);
-    
+
     // Update button states
     onRepositorySelectionChanged();
 }
 
-void MainWindow::addRepository()
+void FetchDeeznutzWindow::addRepository()
 {
     RepositoryDialog dialog(GitRepository(), this);
     if (dialog.exec() == QDialog::Accepted) {
@@ -275,22 +275,22 @@ void MainWindow::addRepository()
     }
 }
 
-void MainWindow::addDirectory()
+void FetchDeeznutzWindow::addDirectory()
 {
     QString directoryPath = QFileDialog::getExistingDirectory(
-        this, 
+        this,
         "Select Directory to Scan for Git Repositories",
         QDir::homePath(),
         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
     );
-    
+
     if (!directoryPath.isEmpty()) {
         logMessage(QString("Scanning directory: %1").arg(directoryPath));
         scanDirectoryForRepositories(directoryPath);
     }
 }
 
-void MainWindow::editRepository()
+void FetchDeeznutzWindow::editRepository()
 {
     QTreeWidgetItem* currentItem = repositoryTree->currentItem();
     GitRepository* repo = getRepositoryFromTreeItem(currentItem);
@@ -310,13 +310,13 @@ void MainWindow::editRepository()
     }
 }
 
-void MainWindow::removeRepository()
+void FetchDeeznutzWindow::removeRepository()
 {
     QTreeWidgetItem* currentItem = repositoryTree->currentItem();
     GitRepository* repo = getRepositoryFromTreeItem(currentItem);
     if (repo) {
         QString repoName = repo->name;
-        int ret = QMessageBox::question(this, "Remove Repository", 
+        int ret = QMessageBox::question(this, "Remove Repository",
                                        QString("Are you sure you want to remove '%1'?").arg(repoName),
                                        QMessageBox::Yes | QMessageBox::No);
         if (ret == QMessageBox::Yes) {
@@ -328,7 +328,7 @@ void MainWindow::removeRepository()
     }
 }
 
-void MainWindow::fetchSelected()
+void FetchDeeznutzWindow::fetchSelected()
 {
     QTreeWidgetItem* currentItem = repositoryTree->currentItem();
     GitRepository* repo = getRepositoryFromTreeItem(currentItem);
@@ -337,7 +337,7 @@ void MainWindow::fetchSelected()
     }
 }
 
-void MainWindow::fetchAll()
+void FetchDeeznutzWindow::fetchAll()
 {
     logMessage("Starting fetch for all enabled repositories...");
     for (GitRepository& repo : repositories) {
@@ -347,7 +347,7 @@ void MainWindow::fetchAll()
     }
 }
 
-void MainWindow::onRepositorySelectionChanged()
+void FetchDeeznutzWindow::onRepositorySelectionChanged()
 {
     QTreeWidgetItem* currentItem = repositoryTree->currentItem();
     bool hasSelection = currentItem && getRepositoryFromTreeItem(currentItem) != nullptr;
@@ -356,7 +356,7 @@ void MainWindow::onRepositorySelectionChanged()
     fetchSelectedButton->setEnabled(hasSelection);
 }
 
-void MainWindow::onFetchIntervalChanged()
+void FetchDeeznutzWindow::onFetchIntervalChanged()
 {
     if (autoFetchCheckBox->isChecked()) {
         fetchTimer->setInterval(globalIntervalSpinBox->value() * 60000);
@@ -364,7 +364,7 @@ void MainWindow::onFetchIntervalChanged()
     }
 }
 
-void MainWindow::onAutoFetchToggled()
+void FetchDeeznutzWindow::onAutoFetchToggled()
 {
     if (autoFetchCheckBox->isChecked()) {
         startScheduledFetch();
@@ -375,14 +375,14 @@ void MainWindow::onAutoFetchToggled()
     }
 }
 
-void MainWindow::performScheduledFetch()
+void FetchDeeznutzWindow::performScheduledFetch()
 {
     if (!autoFetchCheckBox->isChecked()) return;
-    
+
     QDateTime now = QDateTime::currentDateTime();
     for (GitRepository& repo : repositories) {
         if (!repo.enabled) continue;
-        
+
         QDateTime lastFetch = QDateTime::fromString(repo.lastFetch, Qt::ISODate);
         if (!lastFetch.isValid() || lastFetch.addSecs(repo.fetchInterval * 60) <= now) {
             fetchRepository(repo);
@@ -390,23 +390,23 @@ void MainWindow::performScheduledFetch()
     }
 }
 
-void MainWindow::onFetchFinished()
+void FetchDeeznutzWindow::onFetchFinished()
 {
     if (currentFetchIndex >= 0 && currentFetchIndex < repositories.size()) {
         GitRepository& repo = repositories[currentFetchIndex];
         repo.status = "Success";
         repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
         logMessage(QString("✓ Successfully fetched: %1").arg(repo.name));
-        
+
         updateRepositoryTree();
         saveRepositories();
         currentFetchIndex = -1;
     }
-    
+
     isFetching = false;
 }
 
-void MainWindow::onFetchError(const QString& errorMessage)
+void FetchDeeznutzWindow::onFetchError(const QString& errorMessage)
 {
     if (currentFetchIndex >= 0 && currentFetchIndex < repositories.size()) {
         GitRepository& repo = repositories[currentFetchIndex];
@@ -416,42 +416,42 @@ void MainWindow::onFetchError(const QString& errorMessage)
         saveRepositories();
         currentFetchIndex = -1;
     }
-    
+
     isFetching = false;
 }
 
-void MainWindow::updateRepositoryTree()
+void FetchDeeznutzWindow::updateRepositoryTree()
 {
     repositoryTree->clear();
-    
+
     // Create a map to organize repositories by path
     QMap<QString, QList<GitRepository*>> pathMap;
     for (GitRepository& repo : repositories) {
         QString dirPath = QFileInfo(repo.localPath).absolutePath();
         pathMap[dirPath].append(&repo);
     }
-    
+
     // Create tree structure
     for (auto it = pathMap.begin(); it != pathMap.end(); ++it) {
         QString path = it.key();
         QList<GitRepository*> repos = it.value();
-        
+
         // Create path item
         QTreeWidgetItem* pathItem = findOrCreatePathItem(path);
-        
+
         // Add repositories under this path
         for (GitRepository* repo : repos) {
             QString statusIcon = repo->enabled ? "●" : "○";
             QString statusText = repo->status.isEmpty() ? "Ready" : repo->status;
             QString remotesText = QString("%1 remotes").arg(repo->remotes.size());
-            
+
             // Calculate total commit deltas
             int totalAhead = 0, totalBehind = 0;
             for (const GitRemote& remote : repo->remotes) {
                 totalAhead += remote.commitsAhead;
                 totalBehind += remote.commitsBehind;
             }
-            
+
             QString commitDeltaText;
             if (totalAhead > 0 && totalBehind > 0) {
                 commitDeltaText = QString(" [+%1/-%2]").arg(totalAhead).arg(totalBehind);
@@ -462,7 +462,7 @@ void MainWindow::updateRepositoryTree()
             } else {
                 commitDeltaText = " [up-to-date]";
             }
-            
+
             QString itemText = QString("%1 %2 - %3 (%4) [%5]%6")
                               .arg(statusIcon)
                               .arg(repo->name)
@@ -470,53 +470,53 @@ void MainWindow::updateRepositoryTree()
                               .arg(repo->branch)
                               .arg(remotesText)
                               .arg(commitDeltaText);
-            
+
             QTreeWidgetItem* repoItem = new QTreeWidgetItem(pathItem);
             repoItem->setText(0, itemText);
             repoItem->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(repo)));
         }
     }
-    
+
     // Expand all items by default
     repositoryTree->expandAll();
 }
 
-void MainWindow::startScheduledFetch()
+void FetchDeeznutzWindow::startScheduledFetch()
 {
     fetchTimer->setInterval(globalIntervalSpinBox->value() * 60000);
     fetchTimer->start();
 }
 
-void MainWindow::stopScheduledFetch()
+void FetchDeeznutzWindow::stopScheduledFetch()
 {
     fetchTimer->stop();
 }
 
-void MainWindow::fetchRepository(GitRepository& repo)
+void FetchDeeznutzWindow::fetchRepository(GitRepository& repo)
 {
     if (isFetching) {
         logMessage("Another fetch operation is already in progress");
         return;
     }
-    
+
     if (repo.remotes.isEmpty()) {
         logMessage(QString("No remotes configured for repository: %1").arg(repo.name));
         return;
     }
-    
+
     logMessage(QString("Starting fetch for: %1 (%2 remotes)").arg(repo.name).arg(repo.remotes.size()));
     repo.status = "Fetching...";
     updateRepositoryTree();
-    
+
     currentFetchIndex = repositories.indexOf(repo);
     isFetching = true;
-    
+
     // Check if repository exists
     if (!isRepositoryValid(repo.localPath)) {
         onFetchError(QString("Repository not found at: %1").arg(repo.localPath));
         return;
     }
-    
+
     // Open the repository
     git_repository *repository = nullptr;
     int error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
@@ -524,15 +524,15 @@ void MainWindow::fetchRepository(GitRepository& repo)
         onFetchError(getGitErrorMessage(error));
         return;
     }
-    
+
     bool allSuccessful = true;
     QStringList failedRemotes;
-    
+
     // Fetch from all remotes
     for (GitRemote& remote : repo.remotes) {
         logMessage(QString("Fetching from remote: %1 (%2)").arg(remote.name, remote.url));
         remote.status = "Fetching...";
-        
+
         git_remote *git_remote = nullptr;
         error = git_remote_lookup(&git_remote, repository, remote.name.toLocal8Bit().constData());
         if (error < 0) {
@@ -546,35 +546,35 @@ void MainWindow::fetchRepository(GitRepository& repo)
                 continue;
             }
         }
-        
+
         // Fetch from remote
         git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
-        
+
         // Set up authentication callback for SSH
         fetch_opts.callbacks.credentials = [](git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload) -> int {
-            MainWindow *window = static_cast<MainWindow*>(payload);
+            FetchDeeznutzWindow *window = static_cast<FetchDeeznutzWindow*>(payload);
             return window->sshKeyCallback(out, url, username_from_url, allowed_types, payload);
         };
         fetch_opts.callbacks.payload = this;
-        
+
         // Set up callbacks for better error reporting
         fetch_opts.callbacks.sideband_progress = [](const char *str, int len, void *payload) -> int {
             // Log progress messages
             QString message = QString::fromUtf8(str, len).trimmed();
             if (!message.isEmpty()) {
-                // This would need access to the MainWindow instance, but for now just return success
+                // This would need access to the FetchDeeznutzWindow instance, but for now just return success
             }
             return 0;
         };
-        
+
         fetch_opts.callbacks.transfer_progress = [](const git_indexer_progress *stats, void *payload) -> int {
             // Log transfer progress
             return 0;
         };
-        
+
         // Try to fetch
         error = git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
-        
+
         if (error < 0) {
             remote.status = "Error";
             failedRemotes.append(remote.name);
@@ -584,16 +584,16 @@ void MainWindow::fetchRepository(GitRepository& repo)
             remote.status = "Success";
             remote.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
             logMessage(QString("✓ Successfully fetched from: %1").arg(remote.name));
-            
+
             // Calculate commit counts after successful fetch
             calculateRemoteCommitCounts(repository, remote, repo.branch);
         }
-        
+
         git_remote_free(git_remote);
     }
-    
+
     git_repository_free(repository);
-    
+
     if (allSuccessful) {
         repo.status = "Success";
         repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
@@ -605,20 +605,20 @@ void MainWindow::fetchRepository(GitRepository& repo)
 }
 
 
-bool MainWindow::isRepositoryValid(const QString& path)
+bool FetchDeeznutzWindow::isRepositoryValid(const QString& path)
 {
     git_repository *repository = nullptr;
     int error = git_repository_open(&repository, path.toLocal8Bit().constData());
-    
+
     if (error < 0) {
         return false;
     }
-    
+
     git_repository_free(repository);
     return true;
 }
 
-QString MainWindow::getGitErrorMessage(int error) const
+QString FetchDeeznutzWindow::getGitErrorMessage(int error) const
 {
     const git_error *git_error = git_error_last();
     if (git_error && git_error->message) {
@@ -627,11 +627,11 @@ QString MainWindow::getGitErrorMessage(int error) const
     return QString("Unknown Git error: %1").arg(error);
 }
 
-int MainWindow::sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload)
+int FetchDeeznutzWindow::sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload)
 {
     logMessage(QString("SSH authentication requested for URL: %1").arg(QString::fromUtf8(url)));
     logMessage(QString("Username: %1, Allowed types: %2").arg(QString::fromUtf8(username_from_url)).arg(allowed_types));
-    
+
     // Try SSH key authentication first
     if (allowed_types & GIT_CREDENTIAL_SSH_KEY) {
         // Use SSH agent if available
@@ -640,7 +640,7 @@ int MainWindow::sshKeyCallback(git_credential **out, const char *url, const char
             logMessage("Using SSH key from SSH agent");
             return 0;
         }
-        
+
         // Fall back to default SSH key locations
         QString homeDir = QDir::homePath();
         QStringList sshKeyPaths = {
@@ -649,7 +649,7 @@ int MainWindow::sshKeyCallback(git_credential **out, const char *url, const char
             homeDir + "/.ssh/id_ecdsa",
             homeDir + "/.ssh/id_dsa"
         };
-        
+
         for (const QString& keyPath : sshKeyPaths) {
             if (QFile::exists(keyPath)) {
                 error = git_credential_ssh_key_new(out, username_from_url, nullptr, keyPath.toLocal8Bit().constData(), nullptr);
@@ -660,43 +660,43 @@ int MainWindow::sshKeyCallback(git_credential **out, const char *url, const char
             }
         }
     }
-    
+
     // Try username/password if allowed
     if (allowed_types & GIT_CREDENTIAL_USERPASS_PLAINTEXT) {
         logMessage("SSH key authentication failed, but username/password not supported for SSH URLs");
     }
-    
+
     logMessage("No suitable authentication method found");
     return GIT_EUSER; // User cancelled
 }
 
-void MainWindow::calculateCommitCounts(GitRepository& repo)
+void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
 {
     if (!isRepositoryValid(repo.localPath)) {
         return;
     }
-    
+
     git_repository *repository = nullptr;
     int error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
     if (error < 0) {
         return;
     }
-    
+
     for (GitRemote& remote : repo.remotes) {
         calculateRemoteCommitCounts(repository, remote, repo.branch);
     }
-    
+
     git_repository_free(repository);
     updateRepositoryTree();
 }
 
-void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch)
+void FetchDeeznutzWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch)
 {
     // Get the local branch reference
     QString localBranchRef = QString("refs/heads/%1").arg(branch);
     git_reference *localBranch = nullptr;
     int error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
-    
+
     if (error < 0) {
         // Local branch doesn't exist, try HEAD
         error = git_repository_head(&localBranch, repository);
@@ -706,12 +706,12 @@ void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemo
             return;
         }
     }
-    
+
     // Get the remote branch reference
     QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, branch);
     git_reference *remoteBranch = nullptr;
     error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
-    
+
     if (error < 0) {
         // Remote branch doesn't exist, try default branch
         remoteBranchRef = QString("refs/remotes/%1/HEAD").arg(remote.name);
@@ -723,11 +723,11 @@ void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemo
             return;
         }
     }
-    
+
     // Get the commits
     git_commit *localCommit = nullptr;
     git_commit *remoteCommit = nullptr;
-    
+
     error = git_commit_lookup(&localCommit, repository, git_reference_target(localBranch));
     if (error < 0) {
         git_reference_free(localBranch);
@@ -736,7 +736,7 @@ void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemo
         remote.commitsBehind = 0;
         return;
     }
-    
+
     error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
     if (error < 0) {
         git_commit_free(localCommit);
@@ -746,49 +746,49 @@ void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemo
         remote.commitsBehind = 0;
         return;
     }
-    
+
     // Calculate ahead/behind counts
     git_revwalk *walk = nullptr;
     error = git_revwalk_new(&walk, repository);
     if (error >= 0) {
         git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL);
-        
+
         // Count commits ahead (in local but not in remote)
         git_revwalk_push(walk, git_commit_id(localCommit));
         git_revwalk_hide(walk, git_commit_id(remoteCommit));
-        
+
         int ahead = 0;
         git_oid oid;
         while (git_revwalk_next(&oid, walk) == 0) {
             ahead++;
         }
-        
+
         // Count commits behind (in remote but not in local)
         git_revwalk_reset(walk);
         git_revwalk_push(walk, git_commit_id(remoteCommit));
         git_revwalk_hide(walk, git_commit_id(localCommit));
-        
+
         int behind = 0;
         while (git_revwalk_next(&oid, walk) == 0) {
             behind++;
         }
-        
+
         remote.commitsAhead = ahead;
         remote.commitsBehind = behind;
-        
+
         git_revwalk_free(walk);
     } else {
         remote.commitsAhead = 0;
         remote.commitsBehind = 0;
     }
-    
+
     git_commit_free(localCommit);
     git_commit_free(remoteCommit);
     git_reference_free(localBranch);
     git_reference_free(remoteBranch);
 }
 
-QTreeWidgetItem* MainWindow::createPathTreeItem(const QString& path)
+QTreeWidgetItem* FetchDeeznutzWindow::createPathTreeItem(const QString& path)
 {
     QTreeWidgetItem* item = new QTreeWidgetItem();
     item->setText(0, path);
@@ -796,7 +796,7 @@ QTreeWidgetItem* MainWindow::createPathTreeItem(const QString& path)
     return item;
 }
 
-QTreeWidgetItem* MainWindow::findOrCreatePathItem(const QString& path)
+QTreeWidgetItem* FetchDeeznutzWindow::findOrCreatePathItem(const QString& path)
 {
     // Find existing path item
     for (int i = 0; i < repositoryTree->topLevelItemCount(); ++i) {
@@ -805,17 +805,17 @@ QTreeWidgetItem* MainWindow::findOrCreatePathItem(const QString& path)
             return item;
         }
     }
-    
+
     // Create new path item
     QTreeWidgetItem* pathItem = createPathTreeItem(path);
     repositoryTree->addTopLevelItem(pathItem);
     return pathItem;
 }
 
-GitRepository* MainWindow::getRepositoryFromTreeItem(QTreeWidgetItem* item)
+GitRepository* FetchDeeznutzWindow::getRepositoryFromTreeItem(QTreeWidgetItem* item)
 {
     if (!item) return nullptr;
-    
+
     QVariant data = item->data(0, Qt::UserRole);
     if (data.isValid()) {
         void* ptr = data.value<void*>();
@@ -826,52 +826,52 @@ GitRepository* MainWindow::getRepositoryFromTreeItem(QTreeWidgetItem* item)
     return nullptr;
 }
 
-void MainWindow::logMessage(const QString& message)
+void FetchDeeznutzWindow::logMessage(const QString& message)
 {
     QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
     logTextEdit->append(QString("[%1] %2").arg(timestamp, message));
 }
 
-QString MainWindow::getConfigFilePath() const
+QString FetchDeeznutzWindow::getConfigFilePath() const
 {
     QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(configDir);
     return QDir(configDir).filePath("repositories.json");
 }
 
-void MainWindow::loadRepositories()
+void FetchDeeznutzWindow::loadRepositories()
 {
     QFile file(getConfigFilePath());
     if (!file.open(QIODevice::ReadOnly)) {
         logMessage("No existing configuration found, starting fresh");
         return;
     }
-    
+
     QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
     QJsonArray array = doc.array();
-    
+
     repositories.clear();
     for (const QJsonValue& value : array) {
         if (value.isObject()) {
             repositories.append(GitRepository::fromJson(value.toObject()));
         }
     }
-    
+
     logMessage(QString("Loaded %1 repositories from configuration").arg(repositories.size()));
-    
+
     // Calculate commit counts for loaded repositories
     for (GitRepository& repo : repositories) {
         calculateCommitCounts(repo);
     }
 }
 
-void MainWindow::saveRepositories()
+void FetchDeeznutzWindow::saveRepositories()
 {
     QJsonArray array;
     for (const GitRepository& repo : repositories) {
         array.append(repo.toJson());
     }
-    
+
     QJsonDocument doc(array);
     QFile file(getConfigFilePath());
     if (file.open(QIODevice::WriteOnly)) {
@@ -882,14 +882,14 @@ void MainWindow::saveRepositories()
     }
 }
 
-void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
+void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryPath)
 {
     QStringList excludeDirs = {".git", "node_modules", ".vscode", ".idea", "build", "dist", "target", "__pycache__"};
     QStringList gitRepos = findGitRepositories(directoryPath, excludeDirs);
-    
+
     int addedCount = 0;
     int skippedCount = 0;
-    
+
     for (const QString& repoPath : gitRepos) {
         // Check if repository already exists
         bool alreadyExists = false;
@@ -899,12 +899,12 @@ void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
                 break;
             }
         }
-        
+
         if (alreadyExists) {
             skippedCount++;
             continue;
         }
-        
+
         // Create new repository entry
         GitRepository repo;
         repo.name = getRepositoryName(repoPath);
@@ -914,7 +914,7 @@ void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
         repo.enabled = true;
         repo.status = "Ready";
         repo.remotes = getRepositoryRemotes(repoPath);
-        
+
         if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
             repositories.append(repo);
             addedCount++;
@@ -923,7 +923,7 @@ void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
             logMessage(QString("Skipped invalid repository at: %1 (no remotes found)").arg(repoPath));
         }
     }
-    
+
     if (addedCount > 0) {
         // Calculate commit counts for newly added repositories
         for (int i = repositories.size() - addedCount; i < repositories.size(); ++i) {
@@ -932,109 +932,109 @@ void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
         updateRepositoryTree();
         saveRepositories();
     }
-    
+
     logMessage(QString("Directory scan complete: %1 repositories added, %2 skipped (already exist)").arg(addedCount).arg(skippedCount));
 }
 
-QStringList MainWindow::findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs)
+QStringList FetchDeeznutzWindow::findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs)
 {
     QStringList repositories;
     QDir dir(directoryPath);
-    
+
     if (!dir.exists()) {
         return repositories;
     }
-    
+
     // Check if current directory is a git repository
     if (isGitRepository(directoryPath)) {
         repositories.append(directoryPath);
         return repositories; // Don't recurse into subdirectories of a git repo
     }
-    
+
     // Get all subdirectories
     QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    
+
     for (const QFileInfo& entry : entries) {
         QString subDirPath = entry.absoluteFilePath();
         QString dirName = entry.fileName();
-        
+
         // Skip excluded directories
         if (excludeDirs.contains(dirName, Qt::CaseInsensitive)) {
             continue;
         }
-        
+
         // Recursively search subdirectories
         repositories.append(findGitRepositories(subDirPath, excludeDirs));
     }
-    
+
     return repositories;
 }
 
-bool MainWindow::isGitRepository(const QString& path)
+bool FetchDeeznutzWindow::isGitRepository(const QString& path)
 {
     QDir dir(path);
     return dir.exists(".git");
 }
 
-QString MainWindow::getRepositoryName(const QString& path)
+QString FetchDeeznutzWindow::getRepositoryName(const QString& path)
 {
     QDir dir(path);
     return dir.dirName();
 }
 
-QList<GitRemote> MainWindow::getRepositoryRemotes(const QString& path)
+QList<GitRemote> FetchDeeznutzWindow::getRepositoryRemotes(const QString& path)
 {
     QList<GitRemote> remotes;
-    
+
     git_repository *repository = nullptr;
     int error = git_repository_open(&repository, path.toLocal8Bit().constData());
-    
+
     if (error < 0) {
         return remotes;
     }
-    
+
     git_strarray remote_names = {0};
     error = git_remote_list(&remote_names, repository);
-    
+
     if (error >= 0) {
         for (size_t i = 0; i < remote_names.count; ++i) {
             git_remote *remote = nullptr;
             error = git_remote_lookup(&remote, repository, remote_names.strings[i]);
-            
+
             if (error >= 0) {
                 GitRemote gitRemote;
                 gitRemote.name = QString::fromUtf8(remote_names.strings[i]);
-                
+
                 const char *remote_url = git_remote_url(remote);
                 if (remote_url) {
                     gitRemote.url = QString::fromUtf8(remote_url);
                     gitRemote.status = "Ready";
                     remotes.append(gitRemote);
                 }
-                
+
                 git_remote_free(remote);
             }
         }
-        
+
         git_strarray_free(&remote_names);
     }
-    
+
     git_repository_free(repository);
     return remotes;
 }
 
-QString MainWindow::getRepositoryBranch(const QString& path)
+QString FetchDeeznutzWindow::getRepositoryBranch(const QString& path)
 {
     git_repository *repository = nullptr;
     int error = git_repository_open(&repository, path.toLocal8Bit().constData());
-    
+
     if (error < 0) {
         return "main"; // Default branch
     }
-    
+
     git_reference *head = nullptr;
     error = git_repository_head(&head, repository);
-    
+
     QString branch = "main"; // Default
     if (error >= 0) {
         const char *branch_name = git_reference_shorthand(head);
@@ -1043,7 +1043,7 @@ QString MainWindow::getRepositoryBranch(const QString& path)
         }
         git_reference_free(head);
     }
-    
+
     git_repository_free(repository);
     return branch;
 }

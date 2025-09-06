@@ -39,9 +39,9 @@ struct GitRemote {
     QString status;
     int commitsAhead;
     int commitsBehind;
-    
+
     GitRemote() : commitsAhead(0), commitsBehind(0) {}
-    
+
     QJsonObject toJson() const {
         QJsonObject obj;
         obj["name"] = name;
@@ -52,7 +52,7 @@ struct GitRemote {
         obj["commitsBehind"] = commitsBehind;
         return obj;
     }
-    
+
     static GitRemote fromJson(const QJsonObject& obj) {
         GitRemote remote;
         remote.name = obj["name"].toString();
@@ -74,11 +74,11 @@ struct GitRepository {
     QString lastFetch;
     QString status;
     QList<GitRemote> remotes;
-    
+
     bool operator==(const GitRepository& other) const {
         return name == other.name && localPath == other.localPath;
     }
-    
+
     QJsonObject toJson() const {
         QJsonObject obj;
         obj["name"] = name;
@@ -88,16 +88,16 @@ struct GitRepository {
         obj["enabled"] = enabled;
         obj["lastFetch"] = lastFetch;
         obj["status"] = status;
-        
+
         QJsonArray remotesArray;
         for (const GitRemote& remote : remotes) {
             remotesArray.append(remote.toJson());
         }
         obj["remotes"] = remotesArray;
-        
+
         return obj;
     }
-    
+
     static GitRepository fromJson(const QJsonObject& obj) {
         GitRepository repo;
         repo.name = obj["name"].toString();
@@ -107,7 +107,7 @@ struct GitRepository {
         repo.enabled = obj["enabled"].toBool(true);
         repo.lastFetch = obj["lastFetch"].toString();
         repo.status = obj["status"].toString();
-        
+
         // Handle legacy single URL format
         if (obj.contains("url") && !obj["url"].toString().isEmpty()) {
             GitRemote legacyRemote;
@@ -116,7 +116,7 @@ struct GitRepository {
             legacyRemote.status = "Ready";
             repo.remotes.append(legacyRemote);
         }
-        
+
         // Load remotes array
         if (obj.contains("remotes") && obj["remotes"].isArray()) {
             QJsonArray remotesArray = obj["remotes"].toArray();
@@ -126,7 +126,7 @@ struct GitRepository {
                 }
             }
         }
-        
+
         return repo;
     }
 };
@@ -157,13 +157,13 @@ private:
     QLineEdit *remoteUrlEdit;
 };
 
-class MainWindow : public QMainWindow
+class FetchDeeznutzWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
+    FetchDeeznutzWindow(QWidget *parent = nullptr);
+    ~FetchDeeznutzWindow();
 
 private slots:
     void addRepository();
@@ -212,13 +212,13 @@ private:
     QPushButton *removeButton;
     QPushButton *fetchSelectedButton;
     QPushButton *fetchAllButton;
-    
+
     QGroupBox *settingsGroup;
     QSpinBox *globalIntervalSpinBox;
     QCheckBox *autoFetchCheckBox;
-    
+
     QTextEdit *logTextEdit;
-    
+
     QList<GitRepository> repositories;
     QTimer *fetchTimer;
     int currentFetchIndex;

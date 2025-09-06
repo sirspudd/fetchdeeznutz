@@ -18,8 +18,8 @@ pkg_check_modules(LIBGIT2 REQUIRED libgit2)
 
 set(PROJECT_SOURCES
         main.cpp
-        deeznutzwindow.cpp
-        deeznutzwindow.h
+        fetchdeeznutzwindow.cpp
+        fetchdeeznutzwindow.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
