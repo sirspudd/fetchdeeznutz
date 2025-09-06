@@ -420,12 +420,32 @@ void MainWindow::updateRepositoryList()
         QString statusIcon = repo.enabled ? "●" : "○";
         QString statusText = repo.status.isEmpty() ? "Ready" : repo.status;
         QString remotesText = QString("%1 remotes").arg(repo.remotes.size());
-        QString itemText = QString("%1 %2 - %3 (%4) [%5]")
+        
+        // Calculate total commit deltas
+        int totalAhead = 0, totalBehind = 0;
+        for (const GitRemote& remote : repo.remotes) {
+            totalAhead += remote.commitsAhead;
+            totalBehind += remote.commitsBehind;
+        }
+        
+        QString commitDeltaText;
+        if (totalAhead > 0 && totalBehind > 0) {
+            commitDeltaText = QString(" [+%1/-%2]").arg(totalAhead).arg(totalBehind);
+        } else if (totalAhead > 0) {
+            commitDeltaText = QString(" [+%1]").arg(totalAhead);
+        } else if (totalBehind > 0) {
+            commitDeltaText = QString(" [-%1]").arg(totalBehind);
+        } else {
+            commitDeltaText = " [up-to-date]";
+        }
+        
+        QString itemText = QString("%1 %2 - %3 (%4) [%5]%6")
                           .arg(statusIcon)
                           .arg(repo.name)
                           .arg(statusText)
                           .arg(repo.branch)
-                          .arg(remotesText);
+                          .arg(remotesText)
+                          .arg(commitDeltaText);
         repositoryList->addItem(itemText);
     }
 }
@@ -533,6 +553,9 @@ void MainWindow::fetchRepository(GitRepository& repo)
             remote.status = "Success";
             remote.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
             logMessage(QString("✓ Successfully fetched from: %1").arg(remote.name));
+            
+            // Calculate commit counts after successful fetch
+            calculateRemoteCommitCounts(repository, remote, repo.branch);
         }
         
         git_remote_free(git_remote);
@@ -616,6 +639,124 @@ int MainWindow::sshKeyCallback(git_credential **out, const char *url, const char
     return GIT_EUSER; // User cancelled
 }
 
+void MainWindow::calculateCommitCounts(GitRepository& repo)
+{
+    if (!isRepositoryValid(repo.localPath)) {
+        return;
+    }
+    
+    git_repository *repository = nullptr;
+    int error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
+    if (error < 0) {
+        return;
+    }
+    
+    for (GitRemote& remote : repo.remotes) {
+        calculateRemoteCommitCounts(repository, remote, repo.branch);
+    }
+    
+    git_repository_free(repository);
+    updateRepositoryList();
+}
+
+void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch)
+{
+    // Get the local branch reference
+    QString localBranchRef = QString("refs/heads/%1").arg(branch);
+    git_reference *localBranch = nullptr;
+    int error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
+    
+    if (error < 0) {
+        // Local branch doesn't exist, try HEAD
+        error = git_repository_head(&localBranch, repository);
+        if (error < 0) {
+            remote.commitsAhead = 0;
+            remote.commitsBehind = 0;
+            return;
+        }
+    }
+    
+    // Get the remote branch reference
+    QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, branch);
+    git_reference *remoteBranch = nullptr;
+    error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+    
+    if (error < 0) {
+        // Remote branch doesn't exist, try default branch
+        remoteBranchRef = QString("refs/remotes/%1/HEAD").arg(remote.name);
+        error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+        if (error < 0) {
+            git_reference_free(localBranch);
+            remote.commitsAhead = 0;
+            remote.commitsBehind = 0;
+            return;
+        }
+    }
+    
+    // Get the commits
+    git_commit *localCommit = nullptr;
+    git_commit *remoteCommit = nullptr;
+    
+    error = git_commit_lookup(&localCommit, repository, git_reference_target(localBranch));
+    if (error < 0) {
+        git_reference_free(localBranch);
+        git_reference_free(remoteBranch);
+        remote.commitsAhead = 0;
+        remote.commitsBehind = 0;
+        return;
+    }
+    
+    error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
+    if (error < 0) {
+        git_commit_free(localCommit);
+        git_reference_free(localBranch);
+        git_reference_free(remoteBranch);
+        remote.commitsAhead = 0;
+        remote.commitsBehind = 0;
+        return;
+    }
+    
+    // Calculate ahead/behind counts
+    git_revwalk *walk = nullptr;
+    error = git_revwalk_new(&walk, repository);
+    if (error >= 0) {
+        git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL);
+        
+        // Count commits ahead (in local but not in remote)
+        git_revwalk_push(walk, git_commit_id(localCommit));
+        git_revwalk_hide(walk, git_commit_id(remoteCommit));
+        
+        int ahead = 0;
+        git_oid oid;
+        while (git_revwalk_next(&oid, walk) == 0) {
+            ahead++;
+        }
+        
+        // Count commits behind (in remote but not in local)
+        git_revwalk_reset(walk);
+        git_revwalk_push(walk, git_commit_id(remoteCommit));
+        git_revwalk_hide(walk, git_commit_id(localCommit));
+        
+        int behind = 0;
+        while (git_revwalk_next(&oid, walk) == 0) {
+            behind++;
+        }
+        
+        remote.commitsAhead = ahead;
+        remote.commitsBehind = behind;
+        
+        git_revwalk_free(walk);
+    } else {
+        remote.commitsAhead = 0;
+        remote.commitsBehind = 0;
+    }
+    
+    git_commit_free(localCommit);
+    git_commit_free(remoteCommit);
+    git_reference_free(localBranch);
+    git_reference_free(remoteBranch);
+}
+
 void MainWindow::logMessage(const QString& message)
 {
     QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
@@ -648,6 +789,11 @@ void MainWindow::loadRepositories()
     }
     
     logMessage(QString("Loaded %1 repositories from configuration").arg(repositories.size()));
+    
+    // Calculate commit counts for loaded repositories
+    for (GitRepository& repo : repositories) {
+        calculateCommitCounts(repo);
+    }
 }
 
 void MainWindow::saveRepositories()
@@ -710,6 +856,10 @@ void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
     }
     
     if (addedCount > 0) {
+        // Calculate commit counts for newly added repositories
+        for (int i = repositories.size() - addedCount; i < repositories.size(); ++i) {
+            calculateCommitCounts(repositories[i]);
+        }
         updateRepositoryList();
         saveRepositories();
     }

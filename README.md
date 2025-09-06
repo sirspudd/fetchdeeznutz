@@ -15,6 +15,8 @@ A Qt-based graphical application for managing and automatically fetching multipl
 - **Smart Repository Detection**: Recursively scans directories while avoiding common build/cache directories
 - **Multiple Remotes Support**: Fetch from all configured remotes (origin, upstream, fork, etc.) for each repository
 - **Individual Remote Status**: Track the status and last fetch time for each remote separately
+- **Commit Count Deltas**: Display how many commits ahead/behind each repository is compared to its remotes
+- **Real-time Status Updates**: Commit counts are automatically calculated after each fetch operation
 
 ## Building
 
@@ -67,6 +69,14 @@ cmake --build .
 - **Fetch Selected**: Manually fetch the currently selected repository
 - **Fetch All Now**: Manually fetch all enabled repositories
 
+### Understanding Commit Count Deltas
+The repository list shows commit count deltas next to each repository:
+- **[+5]**: 5 commits ahead of remote (local changes not pushed)
+- **[-3]**: 3 commits behind remote (remote changes not pulled)
+- **[+2/-1]**: 2 commits ahead, 1 commit behind (diverged branches)
+- **[up-to-date]**: Local and remote are synchronized
+- **[-0]**: No commits behind (up-to-date with remote)
+
 ### Global Settings
 - **Global Interval**: The base interval for the auto-fetch timer
 - **Enable Auto Fetch**: Toggle automatic fetching on/off
@@ -92,8 +102,9 @@ The application stores its configuration in a JSON file located at:
 3. **Multiple Remote Fetching**: For each repository, fetches from all configured remotes (origin, upstream, fork, etc.)
 4. **Repository Validation**: Only works with existing Git repositories - repositories must be cloned manually before adding to the application
 5. **Status Tracking**: Tracks the last fetch time and current status for each repository and each remote
-6. **Error Handling**: Gracefully handles network errors, authentication failures, and other Git-related issues with detailed error messages
-7. **Partial Success Handling**: If some remotes fail to fetch, the operation is marked as "Partial" with details about which remotes failed
+6. **Commit Count Analysis**: Automatically calculates and displays how many commits each repository is ahead/behind its remotes
+7. **Error Handling**: Gracefully handles network errors, authentication failures, and other Git-related issues with detailed error messages
+8. **Partial Success Handling**: If some remotes fail to fetch, the operation is marked as "Partial" with details about which remotes failed
 
 ## Example Use Cases
 

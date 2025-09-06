@@ -35,6 +35,10 @@ struct GitRemote {
     QString url;
     QString lastFetch;
     QString status;
+    int commitsAhead;
+    int commitsBehind;
+    
+    GitRemote() : commitsAhead(0), commitsBehind(0) {}
     
     QJsonObject toJson() const {
         QJsonObject obj;
@@ -42,6 +46,8 @@ struct GitRemote {
         obj["url"] = url;
         obj["lastFetch"] = lastFetch;
         obj["status"] = status;
+        obj["commitsAhead"] = commitsAhead;
+        obj["commitsBehind"] = commitsBehind;
         return obj;
     }
     
@@ -51,6 +57,8 @@ struct GitRemote {
         remote.url = obj["url"].toString();
         remote.lastFetch = obj["lastFetch"].toString();
         remote.status = obj["status"].toString();
+        remote.commitsAhead = obj["commitsAhead"].toInt(0);
+        remote.commitsBehind = obj["commitsBehind"].toInt(0);
         return remote;
     }
 };
@@ -182,6 +190,8 @@ private:
     QString getConfigFilePath() const;
     QString getGitErrorMessage(int error) const;
     int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
+    void calculateCommitCounts(GitRepository& repo);
+    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch);
     void scanDirectoryForRepositories(const QString& directoryPath);
     QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
     bool isGitRepository(const QString& path);
