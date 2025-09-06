@@ -181,6 +181,7 @@ private:
     void logMessage(const QString& message);
     QString getConfigFilePath() const;
     QString getGitErrorMessage(int error) const;
+    int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
     void scanDirectoryForRepositories(const QString& directoryPath);
     QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
     bool isGitRepository(const QString& path);

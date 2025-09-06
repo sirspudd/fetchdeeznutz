@@ -479,7 +479,7 @@ void MainWindow::fetchRepository(GitRepository& repo)
     
     // Fetch from all remotes
     for (GitRemote& remote : repo.remotes) {
-        logMessage(QString("Fetching from remote: %1").arg(remote.name));
+        logMessage(QString("Fetching from remote: %1 (%2)").arg(remote.name, remote.url));
         remote.status = "Fetching...";
         
         git_remote *git_remote = nullptr;
@@ -498,6 +498,30 @@ void MainWindow::fetchRepository(GitRepository& repo)
         
         // Fetch from remote
         git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
+        
+        // Set up authentication callback for SSH
+        fetch_opts.callbacks.credentials = [](git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload) -> int {
+            MainWindow *window = static_cast<MainWindow*>(payload);
+            return window->sshKeyCallback(out, url, username_from_url, allowed_types, payload);
+        };
+        fetch_opts.callbacks.payload = this;
+        
+        // Set up callbacks for better error reporting
+        fetch_opts.callbacks.sideband_progress = [](const char *str, int len, void *payload) -> int {
+            // Log progress messages
+            QString message = QString::fromUtf8(str, len).trimmed();
+            if (!message.isEmpty()) {
+                // This would need access to the MainWindow instance, but for now just return success
+            }
+            return 0;
+        };
+        
+        fetch_opts.callbacks.transfer_progress = [](const git_indexer_progress *stats, void *payload) -> int {
+            // Log transfer progress
+            return 0;
+        };
+        
+        // Try to fetch
         error = git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
         
         if (error < 0) {
@@ -547,6 +571,49 @@ QString MainWindow::getGitErrorMessage(int error) const
         return QString::fromUtf8(git_error->message);
     }
     return QString("Unknown Git error: %1").arg(error);
+}
+
+int MainWindow::sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload)
+{
+    logMessage(QString("SSH authentication requested for URL: %1").arg(QString::fromUtf8(url)));
+    logMessage(QString("Username: %1, Allowed types: %2").arg(QString::fromUtf8(username_from_url)).arg(allowed_types));
+    
+    // Try SSH key authentication first
+    if (allowed_types & GIT_CREDENTIAL_SSH_KEY) {
+        // Use SSH agent if available
+        int error = git_credential_ssh_key_from_agent(out, username_from_url);
+        if (error == 0) {
+            logMessage("Using SSH key from SSH agent");
+            return 0;
+        }
+        
+        // Fall back to default SSH key locations
+        QString homeDir = QDir::homePath();
+        QStringList sshKeyPaths = {
+            homeDir + "/.ssh/id_rsa",
+            homeDir + "/.ssh/id_ed25519",
+            homeDir + "/.ssh/id_ecdsa",
+            homeDir + "/.ssh/id_dsa"
+        };
+        
+        for (const QString& keyPath : sshKeyPaths) {
+            if (QFile::exists(keyPath)) {
+                error = git_credential_ssh_key_new(out, username_from_url, nullptr, keyPath.toLocal8Bit().constData(), nullptr);
+                if (error == 0) {
+                    logMessage(QString("Using SSH key: %1").arg(keyPath));
+                    return 0;
+                }
+            }
+        }
+    }
+    
+    // Try username/password if allowed
+    if (allowed_types & GIT_CREDENTIAL_USERPASS_PLAINTEXT) {
+        logMessage("SSH key authentication failed, but username/password not supported for SSH URLs");
+    }
+    
+    logMessage("No suitable authentication method found");
+    return GIT_EUSER; // User cancelled
 }
 
 void MainWindow::logMessage(const QString& message)
