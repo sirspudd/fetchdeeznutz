@@ -460,16 +460,10 @@ void MainWindow::fetchRepository(GitRepository& repo)
     currentFetchIndex = repositories.indexOf(repo);
     isFetching = true;
     
-    // Ensure the directory exists
-    QDir().mkpath(repo.localPath);
-    
-    // Check if repository exists, if not clone it
+    // Check if repository exists
     if (!isRepositoryValid(repo.localPath)) {
-        logMessage(QString("Repository not found, cloning: %1").arg(repo.name));
-        if (!cloneRepository(repo)) {
-            onFetchError("Failed to clone repository");
-            return;
-        }
+        onFetchError(QString("Repository not found at: %1").arg(repo.localPath));
+        return;
     }
     
     // Open the repository
@@ -532,34 +526,6 @@ void MainWindow::fetchRepository(GitRepository& repo)
     }
 }
 
-bool MainWindow::cloneRepository(const GitRepository& repo)
-{
-    if (repo.remotes.isEmpty()) {
-        logMessage(QString("No remotes available for cloning repository: %1").arg(repo.name));
-        return false;
-    }
-    
-    // Use the first remote for cloning
-    const GitRemote& primaryRemote = repo.remotes.first();
-    
-    git_repository *repository = nullptr;
-    git_clone_options clone_opts = GIT_CLONE_OPTIONS_INIT;
-    
-    // Set checkout options
-    clone_opts.checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE;
-    
-    int error = git_clone(&repository, primaryRemote.url.toLocal8Bit().constData(), 
-                         repo.localPath.toLocal8Bit().constData(), &clone_opts);
-    
-    if (error < 0) {
-        logMessage(QString("Failed to clone repository from %1: %2").arg(primaryRemote.name, getGitErrorMessage(error)));
-        return false;
-    }
-    
-    git_repository_free(repository);
-    logMessage(QString("Successfully cloned repository: %1 from %2").arg(repo.name, primaryRemote.name));
-    return true;
-}
 
 bool MainWindow::isRepositoryValid(const QString& path)
 {

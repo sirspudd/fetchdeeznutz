@@ -177,7 +177,6 @@ private:
     void startScheduledFetch();
     void stopScheduledFetch();
     void fetchRepository(GitRepository& repo);
-    bool cloneRepository(const GitRepository& repo);
     bool isRepositoryValid(const QString& path);
     void logMessage(const QString& message);
     QString getConfigFilePath() const;

@@ -11,7 +11,6 @@ A Qt-based graphical application for managing and automatically fetching multipl
 - **Activity Logging**: Comprehensive logging of all fetch operations with timestamps
 - **Configuration Persistence**: All settings are saved to a JSON configuration file
 - **libgit2 Integration**: Uses libgit2 library for fast, reliable Git operations without external dependencies
-- **Automatic Cloning**: Automatically clones repositories if they don't exist locally
 - **Directory Scanning**: Automatically discover and add all Git repositories in a directory tree
 - **Smart Repository Detection**: Recursively scans directories while avoiding common build/cache directories
 - **Multiple Remotes Support**: Fetch from all configured remotes (origin, upstream, fork, etc.) for each repository
@@ -91,7 +90,7 @@ The application stores its configuration in a JSON file located at:
 1. **Scheduled Fetching**: The application uses a QTimer to periodically check if any repositories need to be fetched based on their individual intervals
 2. **Git Operations**: Uses libgit2 library for direct Git operations without external process dependencies
 3. **Multiple Remote Fetching**: For each repository, fetches from all configured remotes (origin, upstream, fork, etc.)
-4. **Automatic Cloning**: If a repository doesn't exist locally, it's automatically cloned using the first remote
+4. **Repository Validation**: Only works with existing Git repositories - repositories must be cloned manually before adding to the application
 5. **Status Tracking**: Tracks the last fetch time and current status for each repository and each remote
 6. **Error Handling**: Gracefully handles network errors, authentication failures, and other Git-related issues with detailed error messages
 7. **Partial Success Handling**: If some remotes fail to fetch, the operation is marked as "Partial" with details about which remotes failed
@@ -113,7 +112,7 @@ The application stores its configuration in a JSON file located at:
   - Ubuntu/Debian: `sudo apt install libgit2-dev`
   - Arch Linux: `sudo pacman -S libgit2`
   - Fedora: `sudo dnf install libgit2-devel`
+- **Repository Not Found**: Make sure the local path points to an existing Git repository that has been cloned manually
 - **Permission Errors**: Make sure the application has write access to the local repository paths
 - **Network Issues**: Check your internet connection and repository URLs
 - **Authentication**: For private repositories, ensure your Git credentials are properly configured (SSH keys or HTTPS credentials)
-- **Clone Failures**: Check that the repository URL is correct and accessible
