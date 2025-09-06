@@ -1,5 +1,201 @@
 #include "fetchdeeznutzwindow.h"
 
+GitFetchWorker::GitFetchWorker(QObject *parent)
+    : QObject(parent)
+    , m_stopRequested(false)
+    , m_timeoutSeconds(300) // Default 5 minutes
+{
+}
+
+GitFetchWorker::~GitFetchWorker()
+{
+}
+
+void GitFetchWorker::fetchRepository(const GitRepository& repo)
+{
+    m_stopRequested = false;
+    emit fetchStarted(repo.name);
+    performFetch(repo);
+}
+
+void GitFetchWorker::stopFetching()
+{
+    m_stopRequested = true;
+}
+
+void GitFetchWorker::setTimeout(int timeoutSeconds)
+{
+    m_timeoutSeconds = timeoutSeconds;
+}
+
+void GitFetchWorker::performFetch(const GitRepository& repo)
+{
+    if (m_stopRequested) {
+        emit fetchFinished(repo.name, false, "Fetch cancelled");
+        return;
+    }
+
+    if (repo.remotes.isEmpty()) {
+        emit fetchError(repo.name, "No remotes configured");
+        return;
+    }
+
+    // Check if repository exists
+    if (!isRepositoryValid(repo.localPath)) {
+        emit fetchError(repo.name, QString("Repository not found at: %1").arg(repo.localPath));
+        return;
+    }
+
+    // Open the repository
+    git_repository *repository = nullptr;
+    int error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
+    if (error < 0) {
+        emit fetchError(repo.name, getGitErrorMessage(error));
+        return;
+    }
+
+    // Set up timeout timer
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+    timeoutTimer.setInterval(m_timeoutSeconds * 1000); // Convert to milliseconds
+    
+    bool timeoutOccurred = false;
+    connect(&timeoutTimer, &QTimer::timeout, [&timeoutOccurred, &repo, this]() {
+        timeoutOccurred = true;
+        m_stopRequested = true;
+        emit fetchError(repo.name, QString("Fetch timed out after %1 seconds").arg(m_timeoutSeconds));
+    });
+    
+    timeoutTimer.start();
+
+    bool allSuccessful = true;
+    QStringList failedRemotes;
+    int totalRemotes = repo.remotes.size();
+    int completedRemotes = 0;
+
+    // Fetch from all remotes
+    for (const GitRemote& remote : repo.remotes) {
+        if (m_stopRequested || timeoutOccurred) {
+            git_repository_free(repository);
+            if (timeoutOccurred) {
+                emit fetchFinished(repo.name, false, QString("Fetch timed out after %1 seconds").arg(m_timeoutSeconds));
+            } else {
+                emit fetchFinished(repo.name, false, "Fetch cancelled");
+            }
+            return;
+        }
+
+        emit fetchProgress(repo.name, remote.name, (completedRemotes * 100) / totalRemotes);
+
+        git_remote *git_remote = nullptr;
+        error = git_remote_lookup(&git_remote, repository, remote.name.toLocal8Bit().constData());
+        if (error < 0) {
+            // If remote doesn't exist, add it
+            error = git_remote_create(&git_remote, repository, remote.name.toLocal8Bit().constData(), remote.url.toLocal8Bit().constData());
+            if (error < 0) {
+                failedRemotes.append(remote.name);
+                allSuccessful = false;
+                completedRemotes++;
+                continue;
+            }
+        }
+
+        // Fetch from remote
+        git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
+
+        // Set up authentication callback for SSH
+        fetch_opts.callbacks.credentials = [](git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload) -> int {
+            GitFetchWorker *worker = static_cast<GitFetchWorker*>(payload);
+            return worker->sshKeyCallback(out, url, username_from_url, allowed_types, payload);
+        };
+        fetch_opts.callbacks.payload = this;
+
+        // Try to fetch
+        error = git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
+
+        if (error < 0) {
+            failedRemotes.append(remote.name);
+            allSuccessful = false;
+        }
+
+        git_remote_free(git_remote);
+        completedRemotes++;
+    }
+
+    git_repository_free(repository);
+    timeoutTimer.stop();
+
+    if (timeoutOccurred) {
+        emit fetchFinished(repo.name, false, QString("Fetch timed out after %1 seconds").arg(m_timeoutSeconds));
+    } else if (allSuccessful) {
+        emit fetchFinished(repo.name, true, "All remotes fetched successfully");
+    } else {
+        emit fetchFinished(repo.name, false, QString("Some remotes failed: %1").arg(failedRemotes.join(", ")));
+    }
+}
+
+QString GitFetchWorker::getGitErrorMessage(int error) const
+{
+    const git_error *git_error = git_error_last();
+    if (git_error && git_error->message) {
+        return QString::fromUtf8(git_error->message);
+    }
+    return QString("Unknown Git error: %1").arg(error);
+}
+
+int GitFetchWorker::sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload)
+{
+    // Try SSH key authentication first
+    if (allowed_types & GIT_CREDENTIAL_SSH_KEY) {
+        // Use SSH agent if available
+        int error = git_credential_ssh_key_from_agent(out, username_from_url);
+        if (error == 0) {
+            return 0;
+        }
+
+        // Fall back to default SSH key locations
+        QString homeDir = QDir::homePath();
+        QStringList sshKeyPaths = {
+            homeDir + "/.ssh/id_rsa",
+            homeDir + "/.ssh/id_ed25519",
+            homeDir + "/.ssh/id_ecdsa",
+            homeDir + "/.ssh/id_dsa"
+        };
+
+        for (const QString& keyPath : sshKeyPaths) {
+            if (QFile::exists(keyPath)) {
+                error = git_credential_ssh_key_new(out, username_from_url, nullptr, keyPath.toLocal8Bit().constData(), nullptr);
+                if (error == 0) {
+                    return 0;
+                }
+            }
+        }
+    }
+
+    return GIT_EUSER; // User cancelled
+}
+
+void GitFetchWorker::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch)
+{
+    // This is a simplified version - the full implementation would be similar to the original
+    // For now, just set default values
+    remote.commitsAhead = 0;
+    remote.commitsBehind = 0;
+}
+
+bool GitFetchWorker::isRepositoryValid(const QString& path)
+{
+    git_repository *repository = nullptr;
+    int error = git_repository_open(&repository, path.toLocal8Bit().constData());
+
+    if (error < 0) {
+        return false;
+    }
+
+    git_repository_free(repository);
+    return true;
+}
+
 RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
     : QDialog(parent)
 {
@@ -148,11 +344,25 @@ void RepositoryDialog::onRemoteSelectionChanged()
 FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     : QMainWindow(parent)
     , fetchTimer(new QTimer(this))
+    , fetchThread(new QThread(this))
+    , fetchWorker(new GitFetchWorker())
     , currentFetchIndex(-1)
     , isFetching(false)
 {
     setWindowTitle("Git Repository Fetcher");
     setMinimumSize(800, 600);
+
+    // Setup background thread and worker
+    fetchWorker->moveToThread(fetchThread);
+    connect(fetchThread, &QThread::finished, fetchWorker, &GitFetchWorker::deleteLater);
+    connect(fetchWorker, &GitFetchWorker::fetchStarted, this, &FetchDeeznutzWindow::onBackgroundFetchStarted);
+    connect(fetchWorker, &GitFetchWorker::fetchProgress, this, &FetchDeeznutzWindow::onBackgroundFetchProgress);
+    connect(fetchWorker, &GitFetchWorker::fetchFinished, this, &FetchDeeznutzWindow::onBackgroundFetchFinished);
+    connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
+    fetchThread->start();
+    
+    // Set initial timeout value
+    QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, 300)); // 5 minutes default
 
     setupUI();
     loadRepositories();
@@ -171,6 +381,14 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
 FetchDeeznutzWindow::~FetchDeeznutzWindow()
 {
     saveRepositories();
+    
+    // Clean up background thread
+    if (fetchWorker) {
+        fetchWorker->stopFetching();
+    }
+    fetchThread->quit();
+    fetchThread->wait();
+    
     git_libgit2_shutdown();
 }
 
@@ -229,6 +447,12 @@ void FetchDeeznutzWindow::setupUI()
     globalIntervalSpinBox->setSuffix(" minutes");
     connect(globalIntervalSpinBox, &QSpinBox::valueChanged, this, &FetchDeeznutzWindow::onFetchIntervalChanged);
 
+    fetchTimeoutSpinBox = new QSpinBox();
+    fetchTimeoutSpinBox->setRange(10, 3600); // 10 seconds to 1 hour
+    fetchTimeoutSpinBox->setValue(300); // Default 5 minutes
+    fetchTimeoutSpinBox->setSuffix(" seconds");
+    connect(fetchTimeoutSpinBox, &QSpinBox::valueChanged, this, &FetchDeeznutzWindow::onFetchTimeoutChanged);
+
     autoFetchCheckBox = new QCheckBox("Enable Auto Fetch");
     autoFetchCheckBox->setChecked(true);
     connect(autoFetchCheckBox, &QCheckBox::toggled, this, &FetchDeeznutzWindow::onAutoFetchToggled);
@@ -237,10 +461,18 @@ void FetchDeeznutzWindow::setupUI()
     connect(fetchAllButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::fetchAll);
 
     settingsLayout->addRow("Global Interval:", globalIntervalSpinBox);
+    settingsLayout->addRow("Fetch Timeout:", fetchTimeoutSpinBox);
     settingsLayout->addRow("", autoFetchCheckBox);
     settingsLayout->addRow("", fetchAllButton);
 
     leftLayout->addWidget(settingsGroup);
+
+    // Fetch Status section
+    fetchStatusGroup = new QGroupBox("Active Fetches");
+    fetchStatusLayout = new QVBoxLayout(fetchStatusGroup);
+    fetchStatusGroup->setVisible(false); // Initially hidden
+    leftLayout->addWidget(fetchStatusGroup);
+
     leftLayout->addStretch();
 
     // Right panel - Log
@@ -333,7 +565,8 @@ void FetchDeeznutzWindow::fetchSelected()
     QTreeWidgetItem* currentItem = repositoryTree->currentItem();
     GitRepository* repo = getRepositoryFromTreeItem(currentItem);
     if (repo) {
-        fetchRepository(*repo);
+        // Use background worker for fetching
+        QMetaObject::invokeMethod(fetchWorker, "fetchRepository", Qt::QueuedConnection, Q_ARG(GitRepository, *repo));
     }
 }
 
@@ -342,7 +575,8 @@ void FetchDeeznutzWindow::fetchAll()
     logMessage("Starting fetch for all enabled repositories...");
     for (GitRepository& repo : repositories) {
         if (repo.enabled) {
-            fetchRepository(repo);
+            // Use background worker for fetching
+            QMetaObject::invokeMethod(fetchWorker, "fetchRepository", Qt::QueuedConnection, Q_ARG(GitRepository, repo));
         }
     }
 }
@@ -362,6 +596,13 @@ void FetchDeeznutzWindow::onFetchIntervalChanged()
         fetchTimer->setInterval(globalIntervalSpinBox->value() * 60000);
         logMessage(QString("Auto-fetch interval changed to %1 minutes").arg(globalIntervalSpinBox->value()));
     }
+}
+
+void FetchDeeznutzWindow::onFetchTimeoutChanged()
+{
+    int timeoutSeconds = fetchTimeoutSpinBox->value();
+    QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, timeoutSeconds));
+    logMessage(QString("Fetch timeout changed to %1 seconds").arg(timeoutSeconds));
 }
 
 void FetchDeeznutzWindow::onAutoFetchToggled()
@@ -385,7 +626,8 @@ void FetchDeeznutzWindow::performScheduledFetch()
 
         QDateTime lastFetch = QDateTime::fromString(repo.lastFetch, Qt::ISODate);
         if (!lastFetch.isValid() || lastFetch.addSecs(repo.fetchInterval * 60) <= now) {
-            fetchRepository(repo);
+            // Use background worker for scheduled fetching
+            QMetaObject::invokeMethod(fetchWorker, "fetchRepository", Qt::QueuedConnection, Q_ARG(GitRepository, repo));
         }
     }
 }
@@ -443,6 +685,18 @@ void FetchDeeznutzWindow::updateRepositoryTree()
         for (GitRepository* repo : repos) {
             QString statusIcon = repo->enabled ? "●" : "○";
             QString statusText = repo->status.isEmpty() ? "Ready" : repo->status;
+            
+            // Add special icons for different status types
+            if (statusText == "Timeout") {
+                statusIcon = "⏰";
+            } else if (statusText == "Error") {
+                statusIcon = "❌";
+            } else if (statusText == "Success") {
+                statusIcon = "✅";
+            } else if (statusText == "Fetching...") {
+                statusIcon = "🔄";
+            }
+            
             QString remotesText = QString("%1 remotes").arg(repo->remotes.size());
 
             // Calculate total commit deltas
@@ -1046,5 +1300,114 @@ QString FetchDeeznutzWindow::getRepositoryBranch(const QString& path)
 
     git_repository_free(repository);
     return branch;
+}
+
+void FetchDeeznutzWindow::onBackgroundFetchStarted(const QString& repoName)
+{
+    logMessage(QString("🔄 Started fetching: %1").arg(repoName));
+    
+    // Create progress bar for this repository
+    QProgressBar *progressBar = new QProgressBar();
+    progressBar->setRange(0, 100);
+    progressBar->setValue(0);
+    progressBar->setFormat(QString("%1 - Starting...").arg(repoName));
+    
+    QLabel *label = new QLabel(repoName);
+    QHBoxLayout *itemLayout = new QHBoxLayout();
+    itemLayout->addWidget(label);
+    itemLayout->addWidget(progressBar);
+    
+    QWidget *itemWidget = new QWidget();
+    itemWidget->setLayout(itemLayout);
+    
+    activeFetches[repoName] = progressBar;
+    fetchStatusLayout->addWidget(itemWidget);
+    fetchStatusGroup->setVisible(true);
+    
+    // Update repository status in tree
+    for (GitRepository& repo : repositories) {
+        if (repo.name == repoName) {
+            repo.status = "Fetching...";
+            break;
+        }
+    }
+    updateRepositoryTree();
+}
+
+void FetchDeeznutzWindow::onBackgroundFetchProgress(const QString& repoName, const QString& remoteName, int progress)
+{
+    if (activeFetches.contains(repoName)) {
+        QProgressBar *progressBar = activeFetches[repoName];
+        progressBar->setValue(progress);
+        progressBar->setFormat(QString("%1 - %2 (%3%)").arg(repoName, remoteName).arg(progress));
+    }
+}
+
+void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message)
+{
+    logMessage(QString("✅ Finished fetching: %1 - %2").arg(repoName, message));
+    
+    // Remove progress bar
+    if (activeFetches.contains(repoName)) {
+        QProgressBar *progressBar = activeFetches[repoName];
+        QWidget *itemWidget = progressBar->parentWidget();
+        if (itemWidget) {
+            fetchStatusLayout->removeWidget(itemWidget);
+            itemWidget->deleteLater();
+        }
+        activeFetches.remove(repoName);
+    }
+    
+    // Hide fetch status group if no active fetches
+    if (activeFetches.isEmpty()) {
+        fetchStatusGroup->setVisible(false);
+    }
+    
+    // Update repository status in tree
+    for (GitRepository& repo : repositories) {
+        if (repo.name == repoName) {
+            repo.status = success ? "Success" : "Error";
+            repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
+            break;
+        }
+    }
+    updateRepositoryTree();
+    saveRepositories();
+}
+
+void FetchDeeznutzWindow::onBackgroundFetchError(const QString& repoName, const QString& errorMessage)
+{
+    // Check if this is a timeout error
+    bool isTimeout = errorMessage.contains("timed out", Qt::CaseInsensitive);
+    QString logIcon = isTimeout ? "⏰" : "❌";
+    QString statusText = isTimeout ? "Timeout" : "Error";
+    
+    logMessage(QString("%1 %2 fetching: %3 - %4").arg(logIcon, statusText, repoName, errorMessage));
+    
+    // Remove progress bar
+    if (activeFetches.contains(repoName)) {
+        QProgressBar *progressBar = activeFetches[repoName];
+        QWidget *itemWidget = progressBar->parentWidget();
+        if (itemWidget) {
+            fetchStatusLayout->removeWidget(itemWidget);
+            itemWidget->deleteLater();
+        }
+        activeFetches.remove(repoName);
+    }
+    
+    // Hide fetch status group if no active fetches
+    if (activeFetches.isEmpty()) {
+        fetchStatusGroup->setVisible(false);
+    }
+    
+    // Update repository status in tree
+    for (GitRepository& repo : repositories) {
+        if (repo.name == repoName) {
+            repo.status = statusText;
+            break;
+        }
+    }
+    updateRepositoryTree();
+    saveRepositories();
 }
 

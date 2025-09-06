@@ -31,6 +31,9 @@
 #include <QDateTime>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QThread>
+#include <QProgressBar>
+#include <QLabel>
 
 struct GitRemote {
     QString name;
@@ -131,6 +134,36 @@ struct GitRepository {
     }
 };
 
+class GitFetchWorker : public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit GitFetchWorker(QObject *parent = nullptr);
+    ~GitFetchWorker();
+
+public slots:
+    void fetchRepository(const GitRepository& repo);
+    void stopFetching();
+    void setTimeout(int timeoutSeconds);
+
+signals:
+    void fetchStarted(const QString& repoName);
+    void fetchProgress(const QString& repoName, const QString& remoteName, int progress);
+    void fetchFinished(const QString& repoName, bool success, const QString& message);
+    void fetchError(const QString& repoName, const QString& errorMessage);
+
+private:
+    void performFetch(const GitRepository& repo);
+    QString getGitErrorMessage(int error) const;
+    int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
+    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch);
+    bool isRepositoryValid(const QString& path);
+
+    bool m_stopRequested;
+    int m_timeoutSeconds;
+};
+
 class RepositoryDialog : public QDialog
 {
     Q_OBJECT
@@ -174,10 +207,15 @@ private slots:
     void fetchAll();
     void onRepositorySelectionChanged();
     void onFetchIntervalChanged();
+    void onFetchTimeoutChanged();
     void onAutoFetchToggled();
     void performScheduledFetch();
     void onFetchFinished();
     void onFetchError(const QString& errorMessage);
+    void onBackgroundFetchStarted(const QString& repoName);
+    void onBackgroundFetchProgress(const QString& repoName, const QString& remoteName, int progress);
+    void onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message);
+    void onBackgroundFetchError(const QString& repoName, const QString& errorMessage);
 
 private:
     void setupUI();
@@ -215,9 +253,17 @@ private:
 
     QGroupBox *settingsGroup;
     QSpinBox *globalIntervalSpinBox;
+    QSpinBox *fetchTimeoutSpinBox;
     QCheckBox *autoFetchCheckBox;
 
     QTextEdit *logTextEdit;
+
+    // Background fetching
+    QThread *fetchThread;
+    GitFetchWorker *fetchWorker;
+    QMap<QString, QProgressBar*> activeFetches;
+    QGroupBox *fetchStatusGroup;
+    QVBoxLayout *fetchStatusLayout;
 
     QList<GitRepository> repositories;
     QTimer *fetchTimer;
