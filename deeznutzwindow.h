@@ -2,6 +2,8 @@
 #define DEEZNUTZWINDOW_H
 
 #include <QMainWindow>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 #include <QListWidget>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -193,13 +195,17 @@ private:
     void calculateCommitCounts(GitRepository& repo);
     void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch);
     void scanDirectoryForRepositories(const QString& directoryPath);
+    QTreeWidgetItem* createPathTreeItem(const QString& path);
+    QTreeWidgetItem* findOrCreatePathItem(const QString& path);
+    void updateRepositoryTree();
+    GitRepository* getRepositoryFromTreeItem(QTreeWidgetItem* item);
     QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
     bool isGitRepository(const QString& path);
     QString getRepositoryName(const QString& path);
     QList<GitRemote> getRepositoryRemotes(const QString& path);
     QString getRepositoryBranch(const QString& path);
 
-    QListWidget *repositoryList;
+    QTreeWidget *repositoryTree;
     QPushButton *addButton;
     QPushButton *addDirectoryButton;
     QPushButton *editButton;

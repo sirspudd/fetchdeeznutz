@@ -17,6 +17,8 @@ A Qt-based graphical application for managing and automatically fetching multipl
 - **Individual Remote Status**: Track the status and last fetch time for each remote separately
 - **Commit Count Deltas**: Display how many commits ahead/behind each repository is compared to its remotes
 - **Real-time Status Updates**: Commit counts are automatically calculated after each fetch operation
+- **Hierarchical Tree View**: Repositories are organized by filesystem path in an expandable tree structure
+- **Path-based Organization**: Easily see the directory structure of your repositories at a glance
 
 ## Building
 
@@ -69,8 +71,23 @@ cmake --build .
 - **Fetch Selected**: Manually fetch the currently selected repository
 - **Fetch All Now**: Manually fetch all enabled repositories
 
+### Repository Tree View
+The application displays repositories in a hierarchical tree structure organized by filesystem path:
+
+```
+📁 /home/user/projects
+  ├── 📁 frontend
+  │   ├── ● my-react-app - Success (main) [1 remotes] [up-to-date]
+  │   └── ● vue-project - Success (main) [2 remotes] [+3/-1]
+  ├── 📁 backend
+  │   ├── ● api-server - Success (main) [1 remotes] [-2]
+  │   └── ● database - Success (main) [1 remotes] [+1]
+  └── 📁 tools
+      └── ● build-scripts - Success (main) [1 remotes] [up-to-date]
+```
+
 ### Understanding Commit Count Deltas
-The repository list shows commit count deltas next to each repository:
+The repository tree shows commit count deltas next to each repository:
 - **[+5]**: 5 commits ahead of remote (local changes not pushed)
 - **[-3]**: 3 commits behind remote (remote changes not pulled)
 - **[+2/-1]**: 2 commits ahead, 1 commit behind (diverged branches)

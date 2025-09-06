@@ -156,7 +156,7 @@ MainWindow::MainWindow(QWidget *parent)
     
     setupUI();
     loadRepositories();
-    updateRepositoryList();
+    updateRepositoryTree();
     
     // Connect timer for scheduled fetching
     connect(fetchTimer, &QTimer::timeout, this, &MainWindow::performScheduledFetch);
@@ -188,10 +188,13 @@ void MainWindow::setupUI()
     QGroupBox *repoGroup = new QGroupBox("Repositories");
     QVBoxLayout *repoLayout = new QVBoxLayout(repoGroup);
     
-    repositoryList = new QListWidget();
-    repositoryList->setSelectionMode(QAbstractItemView::SingleSelection);
-    connect(repositoryList, &QListWidget::itemSelectionChanged, this, &MainWindow::onRepositorySelectionChanged);
-    repoLayout->addWidget(repositoryList);
+    repositoryTree = new QTreeWidget();
+    repositoryTree->setSelectionMode(QAbstractItemView::SingleSelection);
+    repositoryTree->setHeaderLabel("Repositories");
+    repositoryTree->setRootIsDecorated(true);
+    repositoryTree->setAlternatingRowColors(true);
+    connect(repositoryTree, &QTreeWidget::itemSelectionChanged, this, &MainWindow::onRepositorySelectionChanged);
+    repoLayout->addWidget(repositoryTree);
     
     // Repository control buttons
     QHBoxLayout *repoButtonLayout = new QHBoxLayout();
@@ -263,7 +266,7 @@ void MainWindow::addRepository()
         GitRepository repo = dialog.getRepository();
         if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
             repositories.append(repo);
-            updateRepositoryList();
+            updateRepositoryTree();
             saveRepositories();
             logMessage(QString("Added repository: %1 with %2 remotes").arg(repo.name).arg(repo.remotes.size()));
         } else {
@@ -289,16 +292,17 @@ void MainWindow::addDirectory()
 
 void MainWindow::editRepository()
 {
-    int currentRow = repositoryList->currentRow();
-    if (currentRow >= 0 && currentRow < repositories.size()) {
-        RepositoryDialog dialog(repositories[currentRow], this);
+    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
+    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
+    if (repo) {
+        RepositoryDialog dialog(*repo, this);
         if (dialog.exec() == QDialog::Accepted) {
-            GitRepository repo = dialog.getRepository();
-            if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
-                repositories[currentRow] = repo;
-                updateRepositoryList();
+            GitRepository newRepo = dialog.getRepository();
+            if (!newRepo.name.isEmpty() && !newRepo.remotes.isEmpty()) {
+                *repo = newRepo;
+                updateRepositoryTree();
                 saveRepositories();
-                logMessage(QString("Updated repository: %1 with %2 remotes").arg(repo.name).arg(repo.remotes.size()));
+                logMessage(QString("Updated repository: %1 with %2 remotes").arg(repo->name).arg(repo->remotes.size()));
             } else {
                 QMessageBox::warning(this, "Invalid Repository", "Name and at least one remote are required.");
             }
@@ -308,15 +312,16 @@ void MainWindow::editRepository()
 
 void MainWindow::removeRepository()
 {
-    int currentRow = repositoryList->currentRow();
-    if (currentRow >= 0 && currentRow < repositories.size()) {
-        QString repoName = repositories[currentRow].name;
+    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
+    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
+    if (repo) {
+        QString repoName = repo->name;
         int ret = QMessageBox::question(this, "Remove Repository", 
                                        QString("Are you sure you want to remove '%1'?").arg(repoName),
                                        QMessageBox::Yes | QMessageBox::No);
         if (ret == QMessageBox::Yes) {
-            repositories.removeAt(currentRow);
-            updateRepositoryList();
+            repositories.removeOne(*repo);
+            updateRepositoryTree();
             saveRepositories();
             logMessage(QString("Removed repository: %1").arg(repoName));
         }
@@ -325,9 +330,10 @@ void MainWindow::removeRepository()
 
 void MainWindow::fetchSelected()
 {
-    int currentRow = repositoryList->currentRow();
-    if (currentRow >= 0 && currentRow < repositories.size()) {
-        fetchRepository(repositories[currentRow]);
+    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
+    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
+    if (repo) {
+        fetchRepository(*repo);
     }
 }
 
@@ -343,7 +349,8 @@ void MainWindow::fetchAll()
 
 void MainWindow::onRepositorySelectionChanged()
 {
-    bool hasSelection = repositoryList->currentRow() >= 0;
+    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
+    bool hasSelection = currentItem && getRepositoryFromTreeItem(currentItem) != nullptr;
     editButton->setEnabled(hasSelection);
     removeButton->setEnabled(hasSelection);
     fetchSelectedButton->setEnabled(hasSelection);
@@ -391,7 +398,7 @@ void MainWindow::onFetchFinished()
         repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
         logMessage(QString("✓ Successfully fetched: %1").arg(repo.name));
         
-        updateRepositoryList();
+        updateRepositoryTree();
         saveRepositories();
         currentFetchIndex = -1;
     }
@@ -405,7 +412,7 @@ void MainWindow::onFetchError(const QString& errorMessage)
         GitRepository& repo = repositories[currentFetchIndex];
         repo.status = "Error";
         logMessage(QString("✗ Error fetching: %1 - %2").arg(repo.name, errorMessage));
-        updateRepositoryList();
+        updateRepositoryTree();
         saveRepositories();
         currentFetchIndex = -1;
     }
@@ -413,41 +420,65 @@ void MainWindow::onFetchError(const QString& errorMessage)
     isFetching = false;
 }
 
-void MainWindow::updateRepositoryList()
+void MainWindow::updateRepositoryTree()
 {
-    repositoryList->clear();
-    for (const GitRepository& repo : repositories) {
-        QString statusIcon = repo.enabled ? "●" : "○";
-        QString statusText = repo.status.isEmpty() ? "Ready" : repo.status;
-        QString remotesText = QString("%1 remotes").arg(repo.remotes.size());
-        
-        // Calculate total commit deltas
-        int totalAhead = 0, totalBehind = 0;
-        for (const GitRemote& remote : repo.remotes) {
-            totalAhead += remote.commitsAhead;
-            totalBehind += remote.commitsBehind;
-        }
-        
-        QString commitDeltaText;
-        if (totalAhead > 0 && totalBehind > 0) {
-            commitDeltaText = QString(" [+%1/-%2]").arg(totalAhead).arg(totalBehind);
-        } else if (totalAhead > 0) {
-            commitDeltaText = QString(" [+%1]").arg(totalAhead);
-        } else if (totalBehind > 0) {
-            commitDeltaText = QString(" [-%1]").arg(totalBehind);
-        } else {
-            commitDeltaText = " [up-to-date]";
-        }
-        
-        QString itemText = QString("%1 %2 - %3 (%4) [%5]%6")
-                          .arg(statusIcon)
-                          .arg(repo.name)
-                          .arg(statusText)
-                          .arg(repo.branch)
-                          .arg(remotesText)
-                          .arg(commitDeltaText);
-        repositoryList->addItem(itemText);
+    repositoryTree->clear();
+    
+    // Create a map to organize repositories by path
+    QMap<QString, QList<GitRepository*>> pathMap;
+    for (GitRepository& repo : repositories) {
+        QString dirPath = QFileInfo(repo.localPath).absolutePath();
+        pathMap[dirPath].append(&repo);
     }
+    
+    // Create tree structure
+    for (auto it = pathMap.begin(); it != pathMap.end(); ++it) {
+        QString path = it.key();
+        QList<GitRepository*> repos = it.value();
+        
+        // Create path item
+        QTreeWidgetItem* pathItem = findOrCreatePathItem(path);
+        
+        // Add repositories under this path
+        for (GitRepository* repo : repos) {
+            QString statusIcon = repo->enabled ? "●" : "○";
+            QString statusText = repo->status.isEmpty() ? "Ready" : repo->status;
+            QString remotesText = QString("%1 remotes").arg(repo->remotes.size());
+            
+            // Calculate total commit deltas
+            int totalAhead = 0, totalBehind = 0;
+            for (const GitRemote& remote : repo->remotes) {
+                totalAhead += remote.commitsAhead;
+                totalBehind += remote.commitsBehind;
+            }
+            
+            QString commitDeltaText;
+            if (totalAhead > 0 && totalBehind > 0) {
+                commitDeltaText = QString(" [+%1/-%2]").arg(totalAhead).arg(totalBehind);
+            } else if (totalAhead > 0) {
+                commitDeltaText = QString(" [+%1]").arg(totalAhead);
+            } else if (totalBehind > 0) {
+                commitDeltaText = QString(" [-%1]").arg(totalBehind);
+            } else {
+                commitDeltaText = " [up-to-date]";
+            }
+            
+            QString itemText = QString("%1 %2 - %3 (%4) [%5]%6")
+                              .arg(statusIcon)
+                              .arg(repo->name)
+                              .arg(statusText)
+                              .arg(repo->branch)
+                              .arg(remotesText)
+                              .arg(commitDeltaText);
+            
+            QTreeWidgetItem* repoItem = new QTreeWidgetItem(pathItem);
+            repoItem->setText(0, itemText);
+            repoItem->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(repo)));
+        }
+    }
+    
+    // Expand all items by default
+    repositoryTree->expandAll();
 }
 
 void MainWindow::startScheduledFetch()
@@ -475,7 +506,7 @@ void MainWindow::fetchRepository(GitRepository& repo)
     
     logMessage(QString("Starting fetch for: %1 (%2 remotes)").arg(repo.name).arg(repo.remotes.size()));
     repo.status = "Fetching...";
-    updateRepositoryList();
+    updateRepositoryTree();
     
     currentFetchIndex = repositories.indexOf(repo);
     isFetching = true;
@@ -656,7 +687,7 @@ void MainWindow::calculateCommitCounts(GitRepository& repo)
     }
     
     git_repository_free(repository);
-    updateRepositoryList();
+    updateRepositoryTree();
 }
 
 void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch)
@@ -755,6 +786,44 @@ void MainWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemo
     git_commit_free(remoteCommit);
     git_reference_free(localBranch);
     git_reference_free(remoteBranch);
+}
+
+QTreeWidgetItem* MainWindow::createPathTreeItem(const QString& path)
+{
+    QTreeWidgetItem* item = new QTreeWidgetItem();
+    item->setText(0, path);
+    item->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(nullptr))); // Mark as path item
+    return item;
+}
+
+QTreeWidgetItem* MainWindow::findOrCreatePathItem(const QString& path)
+{
+    // Find existing path item
+    for (int i = 0; i < repositoryTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = repositoryTree->topLevelItem(i);
+        if (item->text(0) == path) {
+            return item;
+        }
+    }
+    
+    // Create new path item
+    QTreeWidgetItem* pathItem = createPathTreeItem(path);
+    repositoryTree->addTopLevelItem(pathItem);
+    return pathItem;
+}
+
+GitRepository* MainWindow::getRepositoryFromTreeItem(QTreeWidgetItem* item)
+{
+    if (!item) return nullptr;
+    
+    QVariant data = item->data(0, Qt::UserRole);
+    if (data.isValid()) {
+        void* ptr = data.value<void*>();
+        if (ptr) {
+            return static_cast<GitRepository*>(ptr);
+        }
+    }
+    return nullptr;
 }
 
 void MainWindow::logMessage(const QString& message)
@@ -860,7 +929,7 @@ void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
         for (int i = repositories.size() - addedCount; i < repositories.size(); ++i) {
             calculateCommitCounts(repositories[i]);
         }
-        updateRepositoryList();
+        updateRepositoryTree();
         saveRepositories();
     }
     
