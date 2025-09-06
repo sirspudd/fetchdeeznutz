@@ -5,12 +5,15 @@ RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
 {
     setWindowTitle(repo.name.isEmpty() ? "Add Repository" : "Edit Repository");
     setModal(true);
-    resize(400, 300);
+    resize(500, 500);
     
-    QFormLayout *layout = new QFormLayout(this);
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+    
+    // Basic repository info
+    QGroupBox *basicGroup = new QGroupBox("Repository Information");
+    QFormLayout *basicLayout = new QFormLayout(basicGroup);
     
     nameEdit = new QLineEdit(repo.name);
-    urlEdit = new QLineEdit(repo.url);
     pathEdit = new QLineEdit(repo.localPath);
     branchEdit = new QLineEdit(repo.branch.isEmpty() ? "main" : repo.branch);
     intervalSpinBox = new QSpinBox();
@@ -20,30 +23,126 @@ RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
     enabledCheckBox = new QCheckBox();
     enabledCheckBox->setChecked(repo.enabled);
     
-    layout->addRow("Name:", nameEdit);
-    layout->addRow("URL:", urlEdit);
-    layout->addRow("Local Path:", pathEdit);
-    layout->addRow("Branch:", branchEdit);
-    layout->addRow("Fetch Interval:", intervalSpinBox);
-    layout->addRow("Enabled:", enabledCheckBox);
+    basicLayout->addRow("Name:", nameEdit);
+    basicLayout->addRow("Local Path:", pathEdit);
+    basicLayout->addRow("Branch:", branchEdit);
+    basicLayout->addRow("Fetch Interval:", intervalSpinBox);
+    basicLayout->addRow("Enabled:", enabledCheckBox);
     
+    mainLayout->addWidget(basicGroup);
+    
+    // Remotes section
+    QGroupBox *remotesGroup = new QGroupBox("Remotes");
+    QVBoxLayout *remotesLayout = new QVBoxLayout(remotesGroup);
+    
+    remotesList = new QListWidget();
+    remotesList->setSelectionMode(QAbstractItemView::SingleSelection);
+    connect(remotesList, &QListWidget::itemSelectionChanged, this, &RepositoryDialog::onRemoteSelectionChanged);
+    remotesLayout->addWidget(remotesList);
+    
+    // Remote controls
+    QHBoxLayout *remoteControlsLayout = new QHBoxLayout();
+    addRemoteButton = new QPushButton("Add Remote");
+    removeRemoteButton = new QPushButton("Remove Remote");
+    removeRemoteButton->setEnabled(false);
+    
+    connect(addRemoteButton, &QPushButton::clicked, this, &RepositoryDialog::addRemote);
+    connect(removeRemoteButton, &QPushButton::clicked, this, &RepositoryDialog::removeRemote);
+    
+    remoteControlsLayout->addWidget(addRemoteButton);
+    remoteControlsLayout->addWidget(removeRemoteButton);
+    remoteControlsLayout->addStretch();
+    
+    remotesLayout->addLayout(remoteControlsLayout);
+    
+    // Remote input fields
+    QFormLayout *remoteInputLayout = new QFormLayout();
+    remoteNameEdit = new QLineEdit();
+    remoteUrlEdit = new QLineEdit();
+    remoteInputLayout->addRow("Remote Name:", remoteNameEdit);
+    remoteInputLayout->addRow("Remote URL:", remoteUrlEdit);
+    
+    remotesLayout->addLayout(remoteInputLayout);
+    
+    mainLayout->addWidget(remotesGroup);
+    
+    // Load existing remotes
+    for (const GitRemote& remote : repo.remotes) {
+        QString itemText = QString("%1 - %2").arg(remote.name, remote.url);
+        remotesList->addItem(itemText);
+    }
+    
+    // Dialog buttons
     QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     
-    layout->addRow(buttonBox);
+    mainLayout->addWidget(buttonBox);
 }
 
 GitRepository RepositoryDialog::getRepository() const
 {
     GitRepository repo;
     repo.name = nameEdit->text().trimmed();
-    repo.url = urlEdit->text().trimmed();
     repo.localPath = pathEdit->text().trimmed();
     repo.branch = branchEdit->text().trimmed();
     repo.fetchInterval = intervalSpinBox->value();
     repo.enabled = enabledCheckBox->isChecked();
+    
+    // Get remotes from the list
+    for (int i = 0; i < remotesList->count(); ++i) {
+        QString itemText = remotesList->item(i)->text();
+        QStringList parts = itemText.split(" - ");
+        if (parts.size() >= 2) {
+            GitRemote remote;
+            remote.name = parts[0];
+            remote.url = parts[1];
+            remote.status = "Ready";
+            repo.remotes.append(remote);
+        }
+    }
+    
     return repo;
+}
+
+void RepositoryDialog::addRemote()
+{
+    QString name = remoteNameEdit->text().trimmed();
+    QString url = remoteUrlEdit->text().trimmed();
+    
+    if (name.isEmpty() || url.isEmpty()) {
+        QMessageBox::warning(this, "Invalid Remote", "Remote name and URL are required.");
+        return;
+    }
+    
+    // Check if remote name already exists
+    for (int i = 0; i < remotesList->count(); ++i) {
+        QString itemText = remotesList->item(i)->text();
+        if (itemText.startsWith(name + " - ")) {
+            QMessageBox::warning(this, "Duplicate Remote", "A remote with this name already exists.");
+            return;
+        }
+    }
+    
+    QString itemText = QString("%1 - %2").arg(name, url);
+    remotesList->addItem(itemText);
+    
+    remoteNameEdit->clear();
+    remoteUrlEdit->clear();
+}
+
+void RepositoryDialog::removeRemote()
+{
+    int currentRow = remotesList->currentRow();
+    if (currentRow >= 0) {
+        delete remotesList->takeItem(currentRow);
+    }
+}
+
+void RepositoryDialog::onRemoteSelectionChanged()
+{
+    bool hasSelection = remotesList->currentRow() >= 0;
+    removeRemoteButton->setEnabled(hasSelection);
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -162,13 +261,13 @@ void MainWindow::addRepository()
     RepositoryDialog dialog(GitRepository(), this);
     if (dialog.exec() == QDialog::Accepted) {
         GitRepository repo = dialog.getRepository();
-        if (!repo.name.isEmpty() && !repo.url.isEmpty()) {
+        if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
             repositories.append(repo);
             updateRepositoryList();
             saveRepositories();
-            logMessage(QString("Added repository: %1").arg(repo.name));
+            logMessage(QString("Added repository: %1 with %2 remotes").arg(repo.name).arg(repo.remotes.size()));
         } else {
-            QMessageBox::warning(this, "Invalid Repository", "Name and URL are required.");
+            QMessageBox::warning(this, "Invalid Repository", "Name and at least one remote are required.");
         }
     }
 }
@@ -195,13 +294,13 @@ void MainWindow::editRepository()
         RepositoryDialog dialog(repositories[currentRow], this);
         if (dialog.exec() == QDialog::Accepted) {
             GitRepository repo = dialog.getRepository();
-            if (!repo.name.isEmpty() && !repo.url.isEmpty()) {
+            if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
                 repositories[currentRow] = repo;
                 updateRepositoryList();
                 saveRepositories();
-                logMessage(QString("Updated repository: %1").arg(repo.name));
+                logMessage(QString("Updated repository: %1 with %2 remotes").arg(repo.name).arg(repo.remotes.size()));
             } else {
-                QMessageBox::warning(this, "Invalid Repository", "Name and URL are required.");
+                QMessageBox::warning(this, "Invalid Repository", "Name and at least one remote are required.");
             }
         }
     }
@@ -320,11 +419,13 @@ void MainWindow::updateRepositoryList()
     for (const GitRepository& repo : repositories) {
         QString statusIcon = repo.enabled ? "●" : "○";
         QString statusText = repo.status.isEmpty() ? "Ready" : repo.status;
-        QString itemText = QString("%1 %2 - %3 (%4)")
+        QString remotesText = QString("%1 remotes").arg(repo.remotes.size());
+        QString itemText = QString("%1 %2 - %3 (%4) [%5]")
                           .arg(statusIcon)
                           .arg(repo.name)
                           .arg(statusText)
-                          .arg(repo.branch);
+                          .arg(repo.branch)
+                          .arg(remotesText);
         repositoryList->addItem(itemText);
     }
 }
@@ -347,7 +448,12 @@ void MainWindow::fetchRepository(GitRepository& repo)
         return;
     }
     
-    logMessage(QString("Starting fetch for: %1").arg(repo.name));
+    if (repo.remotes.isEmpty()) {
+        logMessage(QString("No remotes configured for repository: %1").arg(repo.name));
+        return;
+    }
+    
+    logMessage(QString("Starting fetch for: %1 (%2 remotes)").arg(repo.name).arg(repo.remotes.size()));
     repo.status = "Fetching...";
     updateRepositoryList();
     
@@ -374,51 +480,84 @@ void MainWindow::fetchRepository(GitRepository& repo)
         return;
     }
     
-    // Get the remote
-    git_remote *remote = nullptr;
-    error = git_remote_lookup(&remote, repository, "origin");
-    if (error < 0) {
-        // If origin doesn't exist, add it
-        error = git_remote_create(&remote, repository, "origin", repo.url.toLocal8Bit().constData());
+    bool allSuccessful = true;
+    QStringList failedRemotes;
+    
+    // Fetch from all remotes
+    for (GitRemote& remote : repo.remotes) {
+        logMessage(QString("Fetching from remote: %1").arg(remote.name));
+        remote.status = "Fetching...";
+        
+        git_remote *git_remote = nullptr;
+        error = git_remote_lookup(&git_remote, repository, remote.name.toLocal8Bit().constData());
         if (error < 0) {
-            git_repository_free(repository);
-            onFetchError(getGitErrorMessage(error));
-            return;
+            // If remote doesn't exist, add it
+            error = git_remote_create(&git_remote, repository, remote.name.toLocal8Bit().constData(), remote.url.toLocal8Bit().constData());
+            if (error < 0) {
+                remote.status = "Error";
+                failedRemotes.append(remote.name);
+                allSuccessful = false;
+                logMessage(QString("Failed to create remote %1: %2").arg(remote.name, getGitErrorMessage(error)));
+                continue;
+            }
         }
+        
+        // Fetch from remote
+        git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
+        error = git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
+        
+        if (error < 0) {
+            remote.status = "Error";
+            failedRemotes.append(remote.name);
+            allSuccessful = false;
+            logMessage(QString("Failed to fetch from %1: %2").arg(remote.name, getGitErrorMessage(error)));
+        } else {
+            remote.status = "Success";
+            remote.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
+            logMessage(QString("✓ Successfully fetched from: %1").arg(remote.name));
+        }
+        
+        git_remote_free(git_remote);
     }
     
-    // Fetch from remote
-    git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
-    error = git_remote_fetch(remote, nullptr, &fetch_opts, nullptr);
-    
-    git_remote_free(remote);
     git_repository_free(repository);
     
-    if (error < 0) {
-        onFetchError(getGitErrorMessage(error));
-    } else {
+    if (allSuccessful) {
+        repo.status = "Success";
+        repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
         onFetchFinished();
+    } else {
+        repo.status = QString("Partial (%1/%2 failed)").arg(failedRemotes.size()).arg(repo.remotes.size());
+        onFetchError(QString("Some remotes failed: %1").arg(failedRemotes.join(", ")));
     }
 }
 
 bool MainWindow::cloneRepository(const GitRepository& repo)
 {
+    if (repo.remotes.isEmpty()) {
+        logMessage(QString("No remotes available for cloning repository: %1").arg(repo.name));
+        return false;
+    }
+    
+    // Use the first remote for cloning
+    const GitRemote& primaryRemote = repo.remotes.first();
+    
     git_repository *repository = nullptr;
     git_clone_options clone_opts = GIT_CLONE_OPTIONS_INIT;
     
     // Set checkout options
     clone_opts.checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE;
     
-    int error = git_clone(&repository, repo.url.toLocal8Bit().constData(), 
+    int error = git_clone(&repository, primaryRemote.url.toLocal8Bit().constData(), 
                          repo.localPath.toLocal8Bit().constData(), &clone_opts);
     
     if (error < 0) {
-        logMessage(QString("Failed to clone repository: %1").arg(getGitErrorMessage(error)));
+        logMessage(QString("Failed to clone repository from %1: %2").arg(primaryRemote.name, getGitErrorMessage(error)));
         return false;
     }
     
     git_repository_free(repository);
-    logMessage(QString("Successfully cloned repository: %1").arg(repo.name));
+    logMessage(QString("Successfully cloned repository: %1 from %2").arg(repo.name, primaryRemote.name));
     return true;
 }
 
@@ -521,19 +660,19 @@ void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
         // Create new repository entry
         GitRepository repo;
         repo.name = getRepositoryName(repoPath);
-        repo.url = getRepositoryUrl(repoPath);
         repo.localPath = repoPath;
         repo.branch = getRepositoryBranch(repoPath);
         repo.fetchInterval = 60; // Default 1 hour
         repo.enabled = true;
         repo.status = "Ready";
+        repo.remotes = getRepositoryRemotes(repoPath);
         
-        if (!repo.name.isEmpty() && !repo.url.isEmpty()) {
+        if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
             repositories.append(repo);
             addedCount++;
-            logMessage(QString("Discovered repository: %1 at %2").arg(repo.name, repoPath));
+            logMessage(QString("Discovered repository: %1 at %2 with %3 remotes").arg(repo.name, repoPath).arg(repo.remotes.size()));
         } else {
-            logMessage(QString("Skipped invalid repository at: %1").arg(repoPath));
+            logMessage(QString("Skipped invalid repository at: %1 (no remotes found)").arg(repoPath));
         }
     }
     
@@ -591,29 +730,45 @@ QString MainWindow::getRepositoryName(const QString& path)
     return dir.dirName();
 }
 
-QString MainWindow::getRepositoryUrl(const QString& path)
+QList<GitRemote> MainWindow::getRepositoryRemotes(const QString& path)
 {
+    QList<GitRemote> remotes;
+    
     git_repository *repository = nullptr;
     int error = git_repository_open(&repository, path.toLocal8Bit().constData());
     
     if (error < 0) {
-        return QString();
+        return remotes;
     }
     
-    git_remote *remote = nullptr;
-    error = git_remote_lookup(&remote, repository, "origin");
+    git_strarray remote_names = {0};
+    error = git_remote_list(&remote_names, repository);
     
-    QString url;
     if (error >= 0) {
-        const char *remote_url = git_remote_url(remote);
-        if (remote_url) {
-            url = QString::fromUtf8(remote_url);
+        for (size_t i = 0; i < remote_names.count; ++i) {
+            git_remote *remote = nullptr;
+            error = git_remote_lookup(&remote, repository, remote_names.strings[i]);
+            
+            if (error >= 0) {
+                GitRemote gitRemote;
+                gitRemote.name = QString::fromUtf8(remote_names.strings[i]);
+                
+                const char *remote_url = git_remote_url(remote);
+                if (remote_url) {
+                    gitRemote.url = QString::fromUtf8(remote_url);
+                    gitRemote.status = "Ready";
+                    remotes.append(gitRemote);
+                }
+                
+                git_remote_free(remote);
+            }
         }
-        git_remote_free(remote);
+        
+        git_strarray_free(&remote_names);
     }
     
     git_repository_free(repository);
-    return url;
+    return remotes;
 }
 
 QString MainWindow::getRepositoryBranch(const QString& path)

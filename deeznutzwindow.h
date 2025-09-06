@@ -30,43 +30,93 @@
 #include <QFileDialog>
 #include <QFileInfo>
 
-struct GitRepository {
+struct GitRemote {
     QString name;
     QString url;
+    QString lastFetch;
+    QString status;
+    
+    QJsonObject toJson() const {
+        QJsonObject obj;
+        obj["name"] = name;
+        obj["url"] = url;
+        obj["lastFetch"] = lastFetch;
+        obj["status"] = status;
+        return obj;
+    }
+    
+    static GitRemote fromJson(const QJsonObject& obj) {
+        GitRemote remote;
+        remote.name = obj["name"].toString();
+        remote.url = obj["url"].toString();
+        remote.lastFetch = obj["lastFetch"].toString();
+        remote.status = obj["status"].toString();
+        return remote;
+    }
+};
+
+struct GitRepository {
+    QString name;
     QString localPath;
     QString branch;
     int fetchInterval; // in minutes
     bool enabled;
     QString lastFetch;
     QString status;
+    QList<GitRemote> remotes;
     
     bool operator==(const GitRepository& other) const {
-        return name == other.name && url == other.url && localPath == other.localPath;
+        return name == other.name && localPath == other.localPath;
     }
     
     QJsonObject toJson() const {
         QJsonObject obj;
         obj["name"] = name;
-        obj["url"] = url;
         obj["localPath"] = localPath;
         obj["branch"] = branch;
         obj["fetchInterval"] = fetchInterval;
         obj["enabled"] = enabled;
         obj["lastFetch"] = lastFetch;
         obj["status"] = status;
+        
+        QJsonArray remotesArray;
+        for (const GitRemote& remote : remotes) {
+            remotesArray.append(remote.toJson());
+        }
+        obj["remotes"] = remotesArray;
+        
         return obj;
     }
     
     static GitRepository fromJson(const QJsonObject& obj) {
         GitRepository repo;
         repo.name = obj["name"].toString();
-        repo.url = obj["url"].toString();
         repo.localPath = obj["localPath"].toString();
         repo.branch = obj["branch"].toString();
         repo.fetchInterval = obj["fetchInterval"].toInt(60);
         repo.enabled = obj["enabled"].toBool(true);
         repo.lastFetch = obj["lastFetch"].toString();
         repo.status = obj["status"].toString();
+        
+        // Handle legacy single URL format
+        if (obj.contains("url") && !obj["url"].toString().isEmpty()) {
+            GitRemote legacyRemote;
+            legacyRemote.name = "origin";
+            legacyRemote.url = obj["url"].toString();
+            legacyRemote.status = "Ready";
+            repo.remotes.append(legacyRemote);
+        }
+        
+        // Load remotes array
+        if (obj.contains("remotes") && obj["remotes"].isArray()) {
+            QJsonArray remotesArray = obj["remotes"].toArray();
+            for (const QJsonValue& value : remotesArray) {
+                if (value.isObject()) {
+                    repo.remotes.append(GitRemote::fromJson(value.toObject()));
+                }
+            }
+        }
+        
         return repo;
     }
 };
@@ -79,13 +129,22 @@ public:
     explicit RepositoryDialog(const GitRepository& repo = GitRepository(), QWidget *parent = nullptr);
     GitRepository getRepository() const;
 
+private slots:
+    void addRemote();
+    void removeRemote();
+    void onRemoteSelectionChanged();
+
 private:
     QLineEdit *nameEdit;
-    QLineEdit *urlEdit;
     QLineEdit *pathEdit;
     QLineEdit *branchEdit;
     QSpinBox *intervalSpinBox;
     QCheckBox *enabledCheckBox;
+    QListWidget *remotesList;
+    QPushButton *addRemoteButton;
+    QPushButton *removeRemoteButton;
+    QLineEdit *remoteNameEdit;
+    QLineEdit *remoteUrlEdit;
 };
 
 class MainWindow : public QMainWindow
@@ -127,7 +186,7 @@ private:
     QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
     bool isGitRepository(const QString& path);
     QString getRepositoryName(const QString& path);
-    QString getRepositoryUrl(const QString& path);
+    QList<GitRemote> getRepositoryRemotes(const QString& path);
     QString getRepositoryBranch(const QString& path);
 
     QListWidget *repositoryList;
