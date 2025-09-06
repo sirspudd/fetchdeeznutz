@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
+# Find libgit2
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBGIT2 REQUIRED libgit2)
+
 set(PROJECT_SOURCES
         main.cpp
         deeznutzwindow.cpp
@@ -42,6 +46,9 @@ else()
 endif()
 
 target_link_libraries(fetchdeeznuts PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+target_include_directories(fetchdeeznuts PRIVATE ${LIBGIT2_INCLUDE_DIRS})
+target_link_libraries(fetchdeeznuts PRIVATE ${LIBGIT2_LIBRARIES})
+target_compile_options(fetchdeeznuts PRIVATE ${LIBGIT2_CFLAGS_OTHER})
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an
