@@ -12,6 +12,8 @@ A Qt-based graphical application for managing and automatically fetching multipl
 - **Configuration Persistence**: All settings are saved to a JSON configuration file
 - **libgit2 Integration**: Uses libgit2 library for fast, reliable Git operations without external dependencies
 - **Automatic Cloning**: Automatically clones repositories if they don't exist locally
+- **Directory Scanning**: Automatically discover and add all Git repositories in a directory tree
+- **Smart Repository Detection**: Recursively scans directories while avoiding common build/cache directories
 
 ## Building
 
@@ -31,8 +33,10 @@ cmake --build .
 
 ## Usage
 
-### Adding a Repository
-1. Click the "Add" button
+### Adding Repositories
+
+#### Adding a Single Repository
+1. Click the "Add Repo" button
 2. Fill in the repository details:
    - **Name**: A friendly name for the repository
    - **URL**: The Git repository URL (e.g., `https://github.com/user/repo.git`)
@@ -40,6 +44,17 @@ cmake --build .
    - **Branch**: The branch to fetch (defaults to "main")
    - **Fetch Interval**: How often to fetch (in minutes)
    - **Enabled**: Whether this repository should be automatically fetched
+
+#### Adding Multiple Repositories from a Directory
+1. Click the "Add Directory" button
+2. Select a top-level directory containing Git repositories
+3. The application will automatically:
+   - Recursively scan the directory tree
+   - Discover all Git repositories (directories containing `.git` folders)
+   - Extract repository information (name, URL, current branch)
+   - Add them to the repository list with default settings
+   - Skip directories that are already in the list
+   - Avoid scanning common build/cache directories (`.git`, `node_modules`, `.vscode`, `.idea`, `build`, `dist`, `target`, `__pycache__`)
 
 ### Managing Repositories
 - **Edit**: Select a repository and click "Edit" to modify its settings
@@ -76,9 +91,11 @@ The application stores its configuration in a JSON file located at:
 ## Example Use Cases
 
 - **Development Workflow**: Keep multiple project repositories up-to-date automatically
+- **Workspace Management**: Scan your entire development workspace to manage all Git repositories at once
 - **Backup Strategy**: Regularly fetch important repositories to ensure local backups
 - **CI/CD Integration**: Monitor repository changes for automated builds
 - **Team Collaboration**: Stay synchronized with team repositories
+- **Multi-Project Development**: Manage repositories across multiple projects and organizations
 
 ## Troubleshooting
 

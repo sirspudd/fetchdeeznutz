@@ -96,17 +96,20 @@ void MainWindow::setupUI()
     
     // Repository control buttons
     QHBoxLayout *repoButtonLayout = new QHBoxLayout();
-    addButton = new QPushButton("Add");
+    addButton = new QPushButton("Add Repo");
+    addDirectoryButton = new QPushButton("Add Directory");
     editButton = new QPushButton("Edit");
     removeButton = new QPushButton("Remove");
     fetchSelectedButton = new QPushButton("Fetch Selected");
     
     connect(addButton, &QPushButton::clicked, this, &MainWindow::addRepository);
+    connect(addDirectoryButton, &QPushButton::clicked, this, &MainWindow::addDirectory);
     connect(editButton, &QPushButton::clicked, this, &MainWindow::editRepository);
     connect(removeButton, &QPushButton::clicked, this, &MainWindow::removeRepository);
     connect(fetchSelectedButton, &QPushButton::clicked, this, &MainWindow::fetchSelected);
     
     repoButtonLayout->addWidget(addButton);
+    repoButtonLayout->addWidget(addDirectoryButton);
     repoButtonLayout->addWidget(editButton);
     repoButtonLayout->addWidget(removeButton);
     repoButtonLayout->addWidget(fetchSelectedButton);
@@ -167,6 +170,21 @@ void MainWindow::addRepository()
         } else {
             QMessageBox::warning(this, "Invalid Repository", "Name and URL are required.");
         }
+    }
+}
+
+void MainWindow::addDirectory()
+{
+    QString directoryPath = QFileDialog::getExistingDirectory(
+        this, 
+        "Select Directory to Scan for Git Repositories",
+        QDir::homePath(),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+    );
+    
+    if (!directoryPath.isEmpty()) {
+        logMessage(QString("Scanning directory: %1").arg(directoryPath));
+        scanDirectoryForRepositories(directoryPath);
     }
 }
 
@@ -475,5 +493,151 @@ void MainWindow::saveRepositories()
     } else {
         logMessage("Failed to save configuration");
     }
+}
+
+void MainWindow::scanDirectoryForRepositories(const QString& directoryPath)
+{
+    QStringList excludeDirs = {".git", "node_modules", ".vscode", ".idea", "build", "dist", "target", "__pycache__"};
+    QStringList gitRepos = findGitRepositories(directoryPath, excludeDirs);
+    
+    int addedCount = 0;
+    int skippedCount = 0;
+    
+    for (const QString& repoPath : gitRepos) {
+        // Check if repository already exists
+        bool alreadyExists = false;
+        for (const GitRepository& existingRepo : repositories) {
+            if (existingRepo.localPath == repoPath) {
+                alreadyExists = true;
+                break;
+            }
+        }
+        
+        if (alreadyExists) {
+            skippedCount++;
+            continue;
+        }
+        
+        // Create new repository entry
+        GitRepository repo;
+        repo.name = getRepositoryName(repoPath);
+        repo.url = getRepositoryUrl(repoPath);
+        repo.localPath = repoPath;
+        repo.branch = getRepositoryBranch(repoPath);
+        repo.fetchInterval = 60; // Default 1 hour
+        repo.enabled = true;
+        repo.status = "Ready";
+        
+        if (!repo.name.isEmpty() && !repo.url.isEmpty()) {
+            repositories.append(repo);
+            addedCount++;
+            logMessage(QString("Discovered repository: %1 at %2").arg(repo.name, repoPath));
+        } else {
+            logMessage(QString("Skipped invalid repository at: %1").arg(repoPath));
+        }
+    }
+    
+    if (addedCount > 0) {
+        updateRepositoryList();
+        saveRepositories();
+    }
+    
+    logMessage(QString("Directory scan complete: %1 repositories added, %2 skipped (already exist)").arg(addedCount).arg(skippedCount));
+}
+
+QStringList MainWindow::findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs)
+{
+    QStringList repositories;
+    QDir dir(directoryPath);
+    
+    if (!dir.exists()) {
+        return repositories;
+    }
+    
+    // Check if current directory is a git repository
+    if (isGitRepository(directoryPath)) {
+        repositories.append(directoryPath);
+        return repositories; // Don't recurse into subdirectories of a git repo
+    }
+    
+    // Get all subdirectories
+    QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    
+    for (const QFileInfo& entry : entries) {
+        QString subDirPath = entry.absoluteFilePath();
+        QString dirName = entry.fileName();
+        
+        // Skip excluded directories
+        if (excludeDirs.contains(dirName, Qt::CaseInsensitive)) {
+            continue;
+        }
+        
+        // Recursively search subdirectories
+        repositories.append(findGitRepositories(subDirPath, excludeDirs));
+    }
+    
+    return repositories;
+}
+
+bool MainWindow::isGitRepository(const QString& path)
+{
+    QDir dir(path);
+    return dir.exists(".git");
+}
+
+QString MainWindow::getRepositoryName(const QString& path)
+{
+    QDir dir(path);
+    return dir.dirName();
+}
+
+QString MainWindow::getRepositoryUrl(const QString& path)
+{
+    git_repository *repository = nullptr;
+    int error = git_repository_open(&repository, path.toLocal8Bit().constData());
+    
+    if (error < 0) {
+        return QString();
+    }
+    
+    git_remote *remote = nullptr;
+    error = git_remote_lookup(&remote, repository, "origin");
+    
+    QString url;
+    if (error >= 0) {
+        const char *remote_url = git_remote_url(remote);
+        if (remote_url) {
+            url = QString::fromUtf8(remote_url);
+        }
+        git_remote_free(remote);
+    }
+    
+    git_repository_free(repository);
+    return url;
+}
+
+QString MainWindow::getRepositoryBranch(const QString& path)
+{
+    git_repository *repository = nullptr;
+    int error = git_repository_open(&repository, path.toLocal8Bit().constData());
+    
+    if (error < 0) {
+        return "main"; // Default branch
+    }
+    
+    git_reference *head = nullptr;
+    error = git_repository_head(&head, repository);
+    
+    QString branch = "main"; // Default
+    if (error >= 0) {
+        const char *branch_name = git_reference_shorthand(head);
+        if (branch_name) {
+            branch = QString::fromUtf8(branch_name);
+        }
+        git_reference_free(head);
+    }
+    
+    git_repository_free(repository);
+    return branch;
 }
 

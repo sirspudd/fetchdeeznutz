@@ -27,6 +27,8 @@
 #include <QDialogButtonBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QFileDialog>
+#include <QFileInfo>
 
 struct GitRepository {
     QString name;
@@ -96,6 +98,7 @@ public:
 
 private slots:
     void addRepository();
+    void addDirectory();
     void editRepository();
     void removeRepository();
     void fetchSelected();
@@ -120,9 +123,16 @@ private:
     void logMessage(const QString& message);
     QString getConfigFilePath() const;
     QString getGitErrorMessage(int error) const;
+    void scanDirectoryForRepositories(const QString& directoryPath);
+    QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
+    bool isGitRepository(const QString& path);
+    QString getRepositoryName(const QString& path);
+    QString getRepositoryUrl(const QString& path);
+    QString getRepositoryBranch(const QString& path);
 
     QListWidget *repositoryList;
     QPushButton *addButton;
+    QPushButton *addDirectoryButton;
     QPushButton *editButton;
     QPushButton *removeButton;
     QPushButton *fetchSelectedButton;
