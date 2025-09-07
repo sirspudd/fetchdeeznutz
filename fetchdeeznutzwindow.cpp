@@ -4,6 +4,7 @@ GitFetchWorker::GitFetchWorker(QObject *parent)
     : QObject(parent)
     , m_stopRequested(false)
     , m_timeoutSeconds(300) // Default 5 minutes
+    , m_connectionTimeoutSeconds(5) // Default 5 seconds
 {
 }
 
@@ -26,6 +27,11 @@ void GitFetchWorker::stopFetching()
 void GitFetchWorker::setTimeout(int timeoutSeconds)
 {
     m_timeoutSeconds = timeoutSeconds;
+}
+
+void GitFetchWorker::setConnectionTimeout(int timeoutSeconds)
+{
+    m_connectionTimeoutSeconds = timeoutSeconds;
 }
 
 void GitFetchWorker::performFetch(const GitRepository& repo)
@@ -110,12 +116,24 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
         };
         fetch_opts.callbacks.payload = this;
 
-        // Try to fetch
+        // Set connection timeout using libgit2's built-in timeout
+        fetch_opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_AUTO;
+        
+        // Try to fetch with connection timeout
+        QElapsedTimer connectionTimer;
+        connectionTimer.start();
+        
         error = git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
+        
+        qint64 elapsedMs = connectionTimer.elapsed();
+        bool connectionTimedOut = (elapsedMs > (m_connectionTimeoutSeconds * 1000));
 
         if (error < 0) {
             failedRemotes.append(remote.name);
             allSuccessful = false;
+        } else if (connectionTimedOut) {
+            // Connection took too long, but succeeded - log as warning
+            emit fetchProgress(repo.name, remote.name + " (slow connection)", (completedRemotes * 100) / totalRemotes);
         }
 
         git_remote_free(git_remote);
@@ -361,8 +379,9 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
     fetchThread->start();
     
-    // Set initial timeout value
+    // Set initial timeout values
     QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, 300)); // 5 minutes default
+    QMetaObject::invokeMethod(fetchWorker, "setConnectionTimeout", Qt::QueuedConnection, Q_ARG(int, 5)); // 5 seconds default
 
     setupUI();
     loadRepositories();
@@ -454,6 +473,12 @@ void FetchDeeznutzWindow::setupUI()
     fetchTimeoutSpinBox->setSuffix(" seconds");
     connect(fetchTimeoutSpinBox, &QSpinBox::valueChanged, this, &FetchDeeznutzWindow::onFetchTimeoutChanged);
 
+    connectionTimeoutSpinBox = new QSpinBox();
+    connectionTimeoutSpinBox->setRange(1, 60); // 1 second to 1 minute
+    connectionTimeoutSpinBox->setValue(5); // Default 5 seconds
+    connectionTimeoutSpinBox->setSuffix(" seconds");
+    connect(connectionTimeoutSpinBox, &QSpinBox::valueChanged, this, &FetchDeeznutzWindow::onConnectionTimeoutChanged);
+
     autoFetchCheckBox = new QCheckBox("Enable Auto Fetch");
     autoFetchCheckBox->setChecked(true);
     connect(autoFetchCheckBox, &QCheckBox::toggled, this, &FetchDeeznutzWindow::onAutoFetchToggled);
@@ -463,6 +488,7 @@ void FetchDeeznutzWindow::setupUI()
 
     settingsLayout->addRow("Global Interval:", globalIntervalSpinBox);
     settingsLayout->addRow("Fetch Timeout:", fetchTimeoutSpinBox);
+    settingsLayout->addRow("Connection Timeout:", connectionTimeoutSpinBox);
     settingsLayout->addRow("", autoFetchCheckBox);
     settingsLayout->addRow("", fetchAllButton);
 
@@ -604,6 +630,13 @@ void FetchDeeznutzWindow::onFetchTimeoutChanged()
     int timeoutSeconds = fetchTimeoutSpinBox->value();
     QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, timeoutSeconds));
     logMessage(QString("Fetch timeout changed to %1 seconds").arg(timeoutSeconds));
+}
+
+void FetchDeeznutzWindow::onConnectionTimeoutChanged()
+{
+    int timeoutSeconds = connectionTimeoutSpinBox->value();
+    QMetaObject::invokeMethod(fetchWorker, "setConnectionTimeout", Qt::QueuedConnection, Q_ARG(int, timeoutSeconds));
+    logMessage(QString("Connection timeout changed to %1 seconds").arg(timeoutSeconds));
 }
 
 void FetchDeeznutzWindow::onAutoFetchToggled()

@@ -34,6 +34,7 @@
 #include <QThread>
 #include <QProgressBar>
 #include <QLabel>
+#include <QElapsedTimer>
 
 struct GitRemote {
     QString name;
@@ -146,6 +147,7 @@ public slots:
     void fetchRepository(const GitRepository& repo);
     void stopFetching();
     void setTimeout(int timeoutSeconds);
+    void setConnectionTimeout(int timeoutSeconds);
 
 signals:
     void fetchStarted(const QString& repoName);
@@ -162,6 +164,7 @@ private:
 
     bool m_stopRequested;
     int m_timeoutSeconds;
+    int m_connectionTimeoutSeconds;
 };
 
 class RepositoryDialog : public QDialog
@@ -208,6 +211,7 @@ private slots:
     void onRepositorySelectionChanged();
     void onFetchIntervalChanged();
     void onFetchTimeoutChanged();
+    void onConnectionTimeoutChanged();
     void onAutoFetchToggled();
     void performScheduledFetch();
     void onFetchFinished();
@@ -255,6 +259,7 @@ private:
     QGroupBox *settingsGroup;
     QSpinBox *globalIntervalSpinBox;
     QSpinBox *fetchTimeoutSpinBox;
+    QSpinBox *connectionTimeoutSpinBox;
     QCheckBox *autoFetchCheckBox;
 
     QTextEdit *logTextEdit;
