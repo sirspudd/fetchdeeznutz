@@ -35,6 +35,10 @@
 #include <QProgressBar>
 #include <QLabel>
 #include <QElapsedTimer>
+#include <QFuture>
+#include <QFutureWatcher>
+#include <QEventLoop>
+#include <QtConcurrent>
 
 struct GitRemote {
     QString name;
@@ -161,6 +165,7 @@ private:
     int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
     void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch);
     bool isRepositoryValid(const QString& path);
+    int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds);
 
     bool m_stopRequested;
     int m_timeoutSeconds;

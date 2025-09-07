@@ -1,5 +1,8 @@
 #include "fetchdeeznutzwindow.h"
 
+// Custom error code for connection timeout
+#define GIT_ETIMEOUT -1000
+
 GitFetchWorker::GitFetchWorker(QObject *parent)
     : QObject(parent)
     , m_stopRequested(false)
@@ -116,24 +119,20 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
         };
         fetch_opts.callbacks.payload = this;
 
-        // Set connection timeout using libgit2's built-in timeout
-        fetch_opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_AUTO;
+        // Don't automatically download tags - let user control this
+        fetch_opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_NONE;
         
         // Try to fetch with connection timeout
-        QElapsedTimer connectionTimer;
-        connectionTimer.start();
-        
-        error = git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
-        
-        qint64 elapsedMs = connectionTimer.elapsed();
-        bool connectionTimedOut = (elapsedMs > (m_connectionTimeoutSeconds * 1000));
+        error = fetchRemoteWithTimeout(git_remote, fetch_opts, m_connectionTimeoutSeconds);
 
         if (error < 0) {
-            failedRemotes.append(remote.name);
+            if (error == GIT_ETIMEOUT) {
+                // Connection timeout - this is a custom error code we return
+                failedRemotes.append(remote.name + " (connection timeout)");
+            } else {
+                failedRemotes.append(remote.name);
+            }
             allSuccessful = false;
-        } else if (connectionTimedOut) {
-            // Connection took too long, but succeeded - log as warning
-            emit fetchProgress(repo.name, remote.name + " (slow connection)", (completedRemotes * 100) / totalRemotes);
         }
 
         git_remote_free(git_remote);
@@ -154,6 +153,10 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
 
 QString GitFetchWorker::getGitErrorMessage(int error) const
 {
+    if (error == GIT_ETIMEOUT) {
+        return QString("Connection timeout after %1 seconds").arg(m_connectionTimeoutSeconds);
+    }
+    
     const git_error *git_error = git_error_last();
     if (git_error && git_error->message) {
         return QString::fromUtf8(git_error->message);
@@ -212,6 +215,41 @@ bool GitFetchWorker::isRepositoryValid(const QString& path)
 
     git_repository_free(repository);
     return true;
+}
+
+int GitFetchWorker::fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds)
+{
+    // Create a future that runs the git fetch operation
+    QFuture<int> future = QtConcurrent::run([git_remote, fetch_opts]() -> int {
+        return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
+    });
+    
+    // Use QFutureWatcher to monitor the future with timeout
+    QFutureWatcher<int> watcher;
+    watcher.setFuture(future);
+    
+    // Create a timer for timeout
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+    timeoutTimer.setInterval(timeoutSeconds * 1000);
+    
+    // Use event loop to wait for completion or timeout
+    QEventLoop loop;
+    connect(&watcher, &QFutureWatcher<int>::finished, &loop, &QEventLoop::quit);
+    connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    
+    timeoutTimer.start();
+    loop.exec();
+    
+    if (timeoutTimer.isActive()) {
+        // Operation completed before timeout
+        timeoutTimer.stop();
+        return future.result();
+    } else {
+        // Timeout occurred - we can't actually cancel the git operation,
+        // but we can return a timeout error code
+        return GIT_ETIMEOUT;
+    }
 }
 
 RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
