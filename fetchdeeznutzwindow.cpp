@@ -196,12 +196,105 @@ int GitFetchWorker::sshKeyCallback(git_credential **out, const char *url, const 
     return GIT_EUSER; // User cancelled
 }
 
-void GitFetchWorker::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch)
+void GitFetchWorker::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName)
 {
-    // This is a simplified version - the full implementation would be similar to the original
-    // For now, just set default values
-    remote.commitsAhead = 0;
-    remote.commitsBehind = 0;
+    // Get the local branch reference
+    QString localBranchRef = QString("refs/heads/%1").arg(branch);
+    git_reference *localBranch = nullptr;
+    int error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
+
+    if (error < 0) {
+        // Local branch doesn't exist, try HEAD
+        error = git_repository_head(&localBranch, repository);
+        if (error < 0) {
+            remote.commitsAhead = 0;
+            remote.commitsBehind = 0;
+            return;
+        }
+    }
+
+    // Get the remote branch reference
+    QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, branch);
+    git_reference *remoteBranch = nullptr;
+    error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+
+    if (error < 0) {
+        // Remote branch doesn't exist, try default branch
+        remoteBranchRef = QString("refs/remotes/%1/HEAD").arg(remote.name);
+        error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+        if (error < 0) {
+            git_reference_free(localBranch);
+            remote.commitsAhead = 0;
+            remote.commitsBehind = 0;
+            return;
+        }
+    }
+
+    // Get the commits
+    git_commit *localCommit = nullptr;
+    git_commit *remoteCommit = nullptr;
+
+    error = git_commit_lookup(&localCommit, repository, git_reference_target(localBranch));
+    if (error < 0) {
+        git_reference_free(localBranch);
+        git_reference_free(remoteBranch);
+        remote.commitsAhead = 0;
+        remote.commitsBehind = 0;
+        return;
+    }
+
+    error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
+    if (error < 0) {
+        git_commit_free(localCommit);
+        git_reference_free(localBranch);
+        git_reference_free(remoteBranch);
+        remote.commitsAhead = 0;
+        remote.commitsBehind = 0;
+        return;
+    }
+
+    // Calculate ahead/behind counts
+    git_revwalk *walk = nullptr;
+    error = git_revwalk_new(&walk, repository);
+    if (error >= 0) {
+        git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL);
+
+        // Count commits ahead (in local but not in remote)
+        git_revwalk_push(walk, git_commit_id(localCommit));
+        git_revwalk_hide(walk, git_commit_id(remoteCommit));
+
+        int ahead = 0;
+        git_oid oid;
+        while (git_revwalk_next(&oid, walk) == 0) {
+            ahead++;
+        }
+
+        // Count commits behind (in remote but not in local)
+        git_revwalk_reset(walk);
+        git_revwalk_push(walk, git_commit_id(remoteCommit));
+        git_revwalk_hide(walk, git_commit_id(localCommit));
+
+        int behind = 0;
+        while (git_revwalk_next(&oid, walk) == 0) {
+            behind++;
+        }
+
+        remote.commitsAhead = ahead;
+        remote.commitsBehind = behind;
+
+        git_revwalk_free(walk);
+    } else {
+        remote.commitsAhead = 0;
+        remote.commitsBehind = 0;
+    }
+
+    // Emit signal with updated commit counts
+    emit commitCountsUpdated(repoName, remote.name, remote.commitsAhead, remote.commitsBehind);
+
+    git_commit_free(localCommit);
+    git_commit_free(remoteCommit);
+    git_reference_free(localBranch);
+    git_reference_free(remoteBranch);
 }
 
 bool GitFetchWorker::isRepositoryValid(const QString& path)
@@ -249,6 +342,85 @@ int GitFetchWorker::fetchRemoteWithTimeout(git_remote* git_remote, const git_fet
         // Timeout occurred - we can't actually cancel the git operation,
         // but we can return a timeout error code
         return GIT_ETIMEOUT;
+    }
+}
+
+RemoteSelectionDialog::RemoteSelectionDialog(const QList<GitRemote>& remotes, QWidget *parent)
+    : QDialog(parent)
+    , allRemotes(remotes)
+{
+    setWindowTitle("Select Remotes to Monitor");
+    setModal(true);
+    resize(500, 300);
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+
+    // Instructions
+    QLabel *instructionLabel = new QLabel("This repository has multiple remotes. Please select which ones you want to monitor and fetch from:");
+    instructionLabel->setWordWrap(true);
+    mainLayout->addWidget(instructionLabel);
+
+    // Remote selection area
+    QGroupBox *remotesGroup = new QGroupBox("Available Remotes");
+    QVBoxLayout *remotesLayout = new QVBoxLayout(remotesGroup);
+
+    // Create checkboxes for each remote
+    for (const GitRemote& remote : allRemotes) {
+        QCheckBox *checkbox = new QCheckBox();
+        checkbox->setChecked(true); // Default to all selected
+        checkbox->setText(QString("%1 - %2").arg(remote.name, remote.url));
+        remoteCheckboxes.append(checkbox);
+        remotesLayout->addWidget(checkbox);
+    }
+
+    mainLayout->addWidget(remotesGroup);
+
+    // Control buttons
+    QHBoxLayout *controlLayout = new QHBoxLayout();
+    QPushButton *selectAllButton = new QPushButton("Select All");
+    QPushButton *selectNoneButton = new QPushButton("Select None");
+    
+    connect(selectAllButton, &QPushButton::clicked, this, &RemoteSelectionDialog::selectAll);
+    connect(selectNoneButton, &QPushButton::clicked, this, &RemoteSelectionDialog::selectNone);
+    
+    controlLayout->addWidget(selectAllButton);
+    controlLayout->addWidget(selectNoneButton);
+    controlLayout->addStretch();
+    
+    mainLayout->addLayout(controlLayout);
+
+    // Dialog buttons
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+    mainLayout->addWidget(buttonBox);
+}
+
+QList<GitRemote> RemoteSelectionDialog::getSelectedRemotes() const
+{
+    QList<GitRemote> selectedRemotes;
+    
+    for (int i = 0; i < remoteCheckboxes.size() && i < allRemotes.size(); ++i) {
+        if (remoteCheckboxes[i]->isChecked()) {
+            selectedRemotes.append(allRemotes[i]);
+        }
+    }
+    
+    return selectedRemotes;
+}
+
+void RemoteSelectionDialog::selectAll()
+{
+    for (QCheckBox *checkbox : remoteCheckboxes) {
+        checkbox->setChecked(true);
+    }
+}
+
+void RemoteSelectionDialog::selectNone()
+{
+    for (QCheckBox *checkbox : remoteCheckboxes) {
+        checkbox->setChecked(false);
     }
 }
 
@@ -415,6 +587,7 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchWorker, &GitFetchWorker::fetchProgress, this, &FetchDeeznutzWindow::onBackgroundFetchProgress);
     connect(fetchWorker, &GitFetchWorker::fetchFinished, this, &FetchDeeznutzWindow::onBackgroundFetchFinished);
     connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
+    connect(fetchWorker, &GitFetchWorker::commitCountsUpdated, this, &FetchDeeznutzWindow::onCommitCountsUpdated);
     fetchThread->start();
     
     // Set initial timeout values
@@ -562,6 +735,21 @@ void FetchDeeznutzWindow::addRepository()
     if (dialog.exec() == QDialog::Accepted) {
         GitRepository repo = dialog.getRepository();
         if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
+            // If repository has multiple remotes, show selection dialog
+            if (repo.remotes.size() > 1) {
+                RemoteSelectionDialog remoteDialog(repo.remotes, this);
+                if (remoteDialog.exec() == QDialog::Accepted) {
+                    QList<GitRemote> selectedRemotes = remoteDialog.getSelectedRemotes();
+                    if (selectedRemotes.isEmpty()) {
+                        QMessageBox::warning(this, "No Remotes Selected", "Please select at least one remote to monitor.");
+                        return;
+                    }
+                    repo.remotes = selectedRemotes;
+                } else {
+                    return; // User cancelled remote selection
+                }
+            }
+            
             repositories.append(repo);
             updateRepositoryTree();
             saveRepositories();
@@ -916,7 +1104,7 @@ void FetchDeeznutzWindow::fetchRepository(GitRepository& repo)
             logMessage(QString("✓ Successfully fetched from: %1").arg(remote.name));
 
             // Calculate commit counts after successful fetch
-            calculateRemoteCommitCounts(repository, remote, repo.branch);
+            calculateRemoteCommitCounts(repository, remote, repo.branch, repo.name);
         }
 
         git_remote_free(git_remote);
@@ -1013,14 +1201,14 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
     }
 
     for (GitRemote& remote : repo.remotes) {
-        calculateRemoteCommitCounts(repository, remote, repo.branch);
+        calculateRemoteCommitCounts(repository, remote, repo.branch, repo.name);
     }
 
     git_repository_free(repository);
     updateRepositoryTree();
 }
 
-void FetchDeeznutzWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch)
+void FetchDeeznutzWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName)
 {
     // Get the local branch reference
     QString localBranchRef = QString("refs/heads/%1").arg(branch);
@@ -1246,6 +1434,24 @@ void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryP
         repo.remotes = getRepositoryRemotes(repoPath);
 
         if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
+            // If repository has multiple remotes, show selection dialog
+            if (repo.remotes.size() > 1) {
+                RemoteSelectionDialog remoteDialog(repo.remotes, this);
+                remoteDialog.setWindowTitle(QString("Select Remotes for %1").arg(repo.name));
+                if (remoteDialog.exec() == QDialog::Accepted) {
+                    QList<GitRemote> selectedRemotes = remoteDialog.getSelectedRemotes();
+                    if (!selectedRemotes.isEmpty()) {
+                        repo.remotes = selectedRemotes;
+                    } else {
+                        logMessage(QString("Skipped repository %1: no remotes selected").arg(repo.name));
+                        continue;
+                    }
+                } else {
+                    logMessage(QString("Skipped repository %1: user cancelled remote selection").arg(repo.name));
+                    continue;
+                }
+            }
+            
             repositories.append(repo);
             addedCount++;
             logMessage(QString("Discovered repository: %1 at %2 with %3 remotes").arg(repo.name, repoPath).arg(repo.remotes.size()));
@@ -1532,6 +1738,24 @@ void FetchDeeznutzWindow::onBackgroundFetchError(const QString& repoName, const 
     }
     updateRepositoryTree();
     saveRepositories();
+}
+
+void FetchDeeznutzWindow::onCommitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind)
+{
+    // Find the repository and update the commit counts for the specific remote
+    for (GitRepository& repo : repositories) {
+        if (repo.name == repoName) {
+            for (GitRemote& remote : repo.remotes) {
+                if (remote.name == remoteName) {
+                    remote.commitsAhead = commitsAhead;
+                    remote.commitsBehind = commitsBehind;
+                    updateRepositoryTree();
+                    saveRepositories();
+                    return;
+                }
+            }
+        }
+    }
 }
 
 

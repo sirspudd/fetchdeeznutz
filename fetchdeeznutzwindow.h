@@ -158,18 +158,36 @@ signals:
     void fetchProgress(const QString& repoName, const QString& remoteName, int progress);
     void fetchFinished(const QString& repoName, bool success, const QString& message);
     void fetchError(const QString& repoName, const QString& errorMessage);
+    void commitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
 
 private:
     void performFetch(const GitRepository& repo);
     QString getGitErrorMessage(int error) const;
     int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
-    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch);
+    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName);
     bool isRepositoryValid(const QString& path);
     int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds);
 
     bool m_stopRequested;
     int m_timeoutSeconds;
     int m_connectionTimeoutSeconds;
+};
+
+class RemoteSelectionDialog : public QDialog
+{
+    Q_OBJECT
+
+public:
+    explicit RemoteSelectionDialog(const QList<GitRemote>& remotes, QWidget *parent = nullptr);
+    QList<GitRemote> getSelectedRemotes() const;
+
+private slots:
+    void selectAll();
+    void selectNone();
+
+private:
+    QList<QCheckBox*> remoteCheckboxes;
+    QList<GitRemote> allRemotes;
 };
 
 class RepositoryDialog : public QDialog
@@ -225,6 +243,7 @@ private slots:
     void onBackgroundFetchProgress(const QString& repoName, const QString& remoteName, int progress);
     void onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message);
     void onBackgroundFetchError(const QString& repoName, const QString& errorMessage);
+    void onCommitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
 
 private:
     void setupUI();
@@ -240,7 +259,7 @@ private:
     QString getGitErrorMessage(int error) const;
     int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
     void calculateCommitCounts(GitRepository& repo);
-    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch);
+    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName);
     void scanDirectoryForRepositories(const QString& directoryPath);
     QTreeWidgetItem* createPathTreeItem(const QString& path);
     QTreeWidgetItem* findOrCreatePathItem(const QString& path);
