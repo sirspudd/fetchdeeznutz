@@ -20,6 +20,7 @@ set(PROJECT_SOURCES
         main.cpp
         fetchdeeznutzwindow.cpp
         fetchdeeznutzwindow.h
+        resources.qrc
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)

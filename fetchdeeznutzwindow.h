@@ -39,6 +39,10 @@
 #include <QFutureWatcher>
 #include <QEventLoop>
 #include <QtConcurrent>
+#include <QSystemTrayIcon>
+#include <QMenu>
+#include <QAction>
+#include <QCloseEvent>
 
 struct GitRemote {
     QString name;
@@ -244,9 +248,16 @@ private slots:
     void onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message);
     void onBackgroundFetchError(const QString& repoName, const QString& errorMessage);
     void onCommitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
+    
+    // System tray slots
+    void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
+    void showWindow();
+    void hideWindow();
+    void quitApplication();
 
 private:
     void setupUI();
+    void setupSystemTray();
     void loadRepositories();
     void saveRepositories();
     void updateRepositoryList();
@@ -265,6 +276,9 @@ private:
     QTreeWidgetItem* findOrCreatePathItem(const QString& path);
     void updateRepositoryTree();
     GitRepository* getRepositoryFromTreeItem(QTreeWidgetItem* item);
+    
+    // Override close event to hide to tray
+    void closeEvent(QCloseEvent *event) override;
     QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
     bool isGitRepository(const QString& path);
     QString getRepositoryName(const QString& path);
@@ -284,6 +298,13 @@ private:
     QSpinBox *globalIntervalSpinBox;
     QSpinBox *fetchTimeoutSpinBox;
     QSpinBox *connectionTimeoutSpinBox;
+    
+    // System tray
+    QSystemTrayIcon *trayIcon;
+    QMenu *trayMenu;
+    QAction *showAction;
+    QAction *hideAction;
+    QAction *quitAction;
     QCheckBox *autoFetchCheckBox;
 
     QTextEdit *logTextEdit;

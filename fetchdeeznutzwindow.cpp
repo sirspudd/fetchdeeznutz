@@ -1,4 +1,5 @@
 #include "fetchdeeznutzwindow.h"
+#include <QApplication>
 
 // Custom error code for connection timeout
 #define GIT_ETIMEOUT -1000
@@ -639,6 +640,7 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     QMetaObject::invokeMethod(fetchWorker, "setConnectionTimeout", Qt::QueuedConnection, Q_ARG(int, 5)); // 5 seconds default
 
     setupUI();
+    setupSystemTray();
     loadRepositories();
     updateRepositoryTree();
 
@@ -771,6 +773,41 @@ void FetchDeeznutzWindow::setupUI()
 
     // Update button states
     onRepositorySelectionChanged();
+}
+
+void FetchDeeznutzWindow::setupSystemTray()
+{
+    // Create system tray icon
+    trayIcon = new QSystemTrayIcon(this);
+    
+    // Set custom nuts icon
+    trayIcon->setIcon(QIcon(":/nuts_icon.svg"));
+    
+    // Create tray menu
+    trayMenu = new QMenu(this);
+    
+    showAction = new QAction("Show", this);
+    hideAction = new QAction("Hide", this);
+    quitAction = new QAction("Quit", this);
+    
+    trayMenu->addAction(showAction);
+    trayMenu->addAction(hideAction);
+    trayMenu->addSeparator();
+    trayMenu->addAction(quitAction);
+    
+    trayIcon->setContextMenu(trayMenu);
+    
+    // Connect signals
+    connect(trayIcon, &QSystemTrayIcon::activated, this, &FetchDeeznutzWindow::onTrayIconActivated);
+    connect(showAction, &QAction::triggered, this, &FetchDeeznutzWindow::showWindow);
+    connect(hideAction, &QAction::triggered, this, &FetchDeeznutzWindow::hideWindow);
+    connect(quitAction, &QAction::triggered, this, &FetchDeeznutzWindow::quitApplication);
+    
+    // Show tray icon
+    trayIcon->show();
+    
+    // Set tooltip
+    trayIcon->setToolTip("FetchDeezNutz - Git Repository Manager");
 }
 
 void FetchDeeznutzWindow::addRepository()
@@ -1837,6 +1874,45 @@ void FetchDeeznutzWindow::onCommitCountsUpdated(const QString& repoName, const Q
                 }
             }
         }
+    }
+}
+
+void FetchDeeznutzWindow::onTrayIconActivated(QSystemTrayIcon::ActivationReason reason)
+{
+    switch (reason) {
+    case QSystemTrayIcon::DoubleClick:
+    case QSystemTrayIcon::Trigger:
+        showWindow();
+        break;
+    default:
+        break;
+    }
+}
+
+void FetchDeeznutzWindow::showWindow()
+{
+    show();
+    raise();
+    activateWindow();
+}
+
+void FetchDeeznutzWindow::hideWindow()
+{
+    hide();
+}
+
+void FetchDeeznutzWindow::quitApplication()
+{
+    QApplication::quit();
+}
+
+void FetchDeeznutzWindow::closeEvent(QCloseEvent *event)
+{
+    if (trayIcon && trayIcon->isVisible()) {
+        hide();
+        event->ignore();
+    } else {
+        event->accept();
     }
 }
 
