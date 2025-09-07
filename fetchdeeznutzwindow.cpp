@@ -1551,6 +1551,7 @@ void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryP
         repo.enabled = true;
         repo.status = "Ready";
         repo.remotes = getRepositoryRemotes(repoPath);
+        repo.worktrees = findWorktreesForRepository(repoPath);
 
         if (!repo.name.isEmpty() && !repo.remotes.isEmpty()) {
             // If repository has multiple remotes, show selection dialog
@@ -1573,7 +1574,8 @@ void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryP
             
             repositories.append(repo);
             addedCount++;
-            logMessage(QString("Discovered repository: %1 at %2 with %3 remotes").arg(repo.name, repoPath).arg(repo.remotes.size()));
+            QString worktreeInfo = repo.worktrees.isEmpty() ? "" : QString(" and %1 worktrees").arg(repo.worktrees.size());
+            logMessage(QString("Discovered repository: %1 at %2 with %3 remotes%4").arg(repo.name, repoPath).arg(repo.remotes.size()).arg(worktreeInfo));
         } else {
             logMessage(QString("Skipped invalid repository at: %1 (no remotes found)").arg(repoPath));
         }
@@ -1600,9 +1602,15 @@ QStringList FetchDeeznutzWindow::findGitRepositories(const QString& directoryPat
         return repositories;
     }
 
-    // Check if current directory is a git repository
-    if (isGitRepository(directoryPath)) {
-        repositories.append(directoryPath);
+    // Check if current directory is a git repository or worktree
+    if (isGitRepository(directoryPath) || isGitWorktree(directoryPath)) {
+        // Find the main repository path to avoid duplicates
+        QString mainRepoPath = findMainGitRepository(directoryPath);
+        
+        // Only add if we haven't seen this main repository before
+        if (!repositories.contains(mainRepoPath)) {
+            repositories.append(mainRepoPath);
+        }
         return repositories; // Don't recurse into subdirectories of a git repo
     }
 
@@ -1619,7 +1627,14 @@ QStringList FetchDeeznutzWindow::findGitRepositories(const QString& directoryPat
         }
 
         // Recursively search subdirectories
-        repositories.append(findGitRepositories(subDirPath, excludeDirs));
+        QStringList subRepos = findGitRepositories(subDirPath, excludeDirs);
+        
+        // Add unique repositories only
+        for (const QString& repo : subRepos) {
+            if (!repositories.contains(repo)) {
+                repositories.append(repo);
+            }
+        }
     }
 
     return repositories;
@@ -1629,6 +1644,86 @@ bool FetchDeeznutzWindow::isGitRepository(const QString& path)
 {
     QDir dir(path);
     return dir.exists(".git");
+}
+
+bool FetchDeeznutzWindow::isGitWorktree(const QString& path)
+{
+    QDir dir(path);
+    QFile gitFile(path + "/.git");
+    
+    if (!gitFile.exists()) {
+        return false;
+    }
+    
+    // Read the .git file to check if it's a worktree
+    if (gitFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&gitFile);
+        QString content = in.readAll().trimmed();
+        gitFile.close();
+        
+        // Git worktrees have .git files that start with "gitdir: "
+        return content.startsWith("gitdir: ");
+    }
+    
+    return false;
+}
+
+QString FetchDeeznutzWindow::findMainGitRepository(const QString& path)
+{
+    if (isGitWorktree(path)) {
+        QFile gitFile(path + "/.git");
+        if (gitFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream in(&gitFile);
+            QString content = in.readAll().trimmed();
+            gitFile.close();
+            
+            if (content.startsWith("gitdir: ")) {
+                QString gitDir = content.mid(8); // Remove "gitdir: " prefix
+                // The gitdir path is relative to the worktree, so we need to resolve it
+                QDir worktreeDir(path);
+                QString absoluteGitDir = worktreeDir.absoluteFilePath(gitDir);
+                
+                // The main repository is typically in the parent directory of the worktree's gitdir
+                QDir gitDirObj(absoluteGitDir);
+                return gitDirObj.absolutePath();
+            }
+        }
+    }
+    
+    return path; // Return the original path if it's not a worktree
+}
+
+QStringList FetchDeeznutzWindow::findWorktreesForRepository(const QString& mainRepoPath)
+{
+    QStringList worktrees;
+    
+    // Check the main repository's worktrees directory
+    QDir mainRepoDir(mainRepoPath);
+    QDir worktreesDir(mainRepoDir.absoluteFilePath(".git/worktrees"));
+    
+    if (worktreesDir.exists()) {
+        QFileInfoList entries = worktreesDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo& entry : entries) {
+            QString worktreePath = entry.absoluteFilePath();
+            QFile gitFile(worktreePath + "/gitdir");
+            
+            if (gitFile.exists() && gitFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                QTextStream in(&gitFile);
+                QString gitDirPath = in.readAll().trimmed();
+                gitFile.close();
+                
+                // The gitdir file contains the path to the worktree's .git file
+                // We need to find the actual worktree directory
+                QFileInfo gitDirInfo(gitDirPath);
+                if (gitDirInfo.exists()) {
+                    QString worktreeDir = gitDirInfo.absolutePath();
+                    worktrees.append(worktreeDir);
+                }
+            }
+        }
+    }
+    
+    return worktrees;
 }
 
 QString FetchDeeznutzWindow::getRepositoryName(const QString& path)

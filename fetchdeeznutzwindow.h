@@ -43,6 +43,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QCloseEvent>
+#include <QTextStream>
 
 struct GitRemote {
     QString name;
@@ -86,6 +87,7 @@ struct GitRepository {
     QString lastFetch;
     QString status;
     QList<GitRemote> remotes;
+    QStringList worktrees; // List of worktree paths
 
     bool operator==(const GitRepository& other) const {
         return name == other.name && localPath == other.localPath;
@@ -106,6 +108,12 @@ struct GitRepository {
             remotesArray.append(remote.toJson());
         }
         obj["remotes"] = remotesArray;
+
+        QJsonArray worktreesArray;
+        for (const QString& worktree : worktrees) {
+            worktreesArray.append(worktree);
+        }
+        obj["worktrees"] = worktreesArray;
 
         return obj;
     }
@@ -135,6 +143,16 @@ struct GitRepository {
             for (const QJsonValue& value : remotesArray) {
                 if (value.isObject()) {
                     repo.remotes.append(GitRemote::fromJson(value.toObject()));
+                }
+            }
+        }
+
+        // Load worktrees array
+        if (obj.contains("worktrees") && obj["worktrees"].isArray()) {
+            QJsonArray worktreesArray = obj["worktrees"].toArray();
+            for (const QJsonValue& value : worktreesArray) {
+                if (value.isString()) {
+                    repo.worktrees.append(value.toString());
                 }
             }
         }
@@ -281,6 +299,9 @@ private:
     void closeEvent(QCloseEvent *event) override;
     QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
     bool isGitRepository(const QString& path);
+    bool isGitWorktree(const QString& path);
+    QString findMainGitRepository(const QString& path);
+    QStringList findWorktreesForRepository(const QString& mainRepoPath);
     QString getRepositoryName(const QString& path);
     QList<GitRemote> getRepositoryRemotes(const QString& path);
     QString getRepositoryBranch(const QString& path);
