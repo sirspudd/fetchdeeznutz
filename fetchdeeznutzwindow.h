@@ -44,6 +44,7 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QTextStream>
+#include <QContextMenuEvent>
 
 struct GitRemote {
     QString name;
@@ -251,6 +252,7 @@ private slots:
     void addDirectory();
     void editRepository();
     void removeRepository();
+    void removeDirectory();
     void fetchSelected();
     void fetchAll();
     void onRepositorySelectionChanged();
@@ -272,6 +274,7 @@ private slots:
     void showWindow();
     void hideWindow();
     void quitApplication();
+    void showContextMenu(const QPoint& pos);
 
 private:
     void setupUI();
@@ -308,6 +311,7 @@ private:
     QString generateRepositoryTooltip(const GitRepository& repo);
 
     QTreeWidget *repositoryTree;
+    QMenu *contextMenu;
     QPushButton *addButton;
     QPushButton *addDirectoryButton;
     QPushButton *editButton;

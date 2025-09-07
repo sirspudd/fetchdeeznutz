@@ -687,9 +687,20 @@ void FetchDeeznutzWindow::setupUI()
     repositoryTree->setHeaderLabel("Repositories");
     repositoryTree->setRootIsDecorated(true);
     repositoryTree->setAlternatingRowColors(true);
+    repositoryTree->setContextMenuPolicy(Qt::CustomContextMenu);
     // Tooltips are set directly on tree items
     connect(repositoryTree, &QTreeWidget::itemSelectionChanged, this, &FetchDeeznutzWindow::onRepositorySelectionChanged);
+    connect(repositoryTree, &QTreeWidget::customContextMenuRequested, this, &FetchDeeznutzWindow::showContextMenu);
     repoLayout->addWidget(repositoryTree);
+
+    // Setup context menu
+    contextMenu = new QMenu(this);
+    QAction *removeRepoAction = new QAction("Remove Repository", this);
+    QAction *removeDirAction = new QAction("Remove Directory", this);
+    contextMenu->addAction(removeRepoAction);
+    contextMenu->addAction(removeDirAction);
+    connect(removeRepoAction, &QAction::triggered, this, &FetchDeeznutzWindow::removeRepository);
+    connect(removeDirAction, &QAction::triggered, this, &FetchDeeznutzWindow::removeDirectory);
 
     // Repository control buttons
     QHBoxLayout *repoButtonLayout = new QHBoxLayout();
@@ -892,6 +903,87 @@ void FetchDeeznutzWindow::removeRepository()
             logMessage(QString("Removed repository: %1").arg(repoName));
         }
     }
+}
+
+void FetchDeeznutzWindow::removeDirectory()
+{
+    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
+    if (!currentItem) return;
+
+    // Check if this is a directory item (has no repository data)
+    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
+    if (repo) {
+        // If it's a repository item, remove just that repository
+        removeRepository();
+        return;
+    }
+
+    // It's a directory item, get the directory path
+    QString dirPath = currentItem->text(0);
+    
+    // Count repositories in this directory
+    int repoCount = 0;
+    for (const GitRepository& repo : repositories) {
+        QString repoDirPath = QFileInfo(repo.localPath).absolutePath();
+        if (repoDirPath == dirPath) {
+            repoCount++;
+        }
+    }
+
+    if (repoCount == 0) {
+        QMessageBox::information(this, "No Repositories", "No repositories found in this directory.");
+        return;
+    }
+
+    int ret = QMessageBox::question(this, "Remove Directory",
+                                   QString("Are you sure you want to remove all %1 repositories from directory '%2'?").arg(repoCount).arg(dirPath),
+                                   QMessageBox::Yes | QMessageBox::No);
+    
+    if (ret == QMessageBox::Yes) {
+        // Remove all repositories in this directory
+        auto it = repositories.begin();
+        while (it != repositories.end()) {
+            QString repoDirPath = QFileInfo(it->localPath).absolutePath();
+            if (repoDirPath == dirPath) {
+                logMessage(QString("Removed repository: %1").arg(it->name));
+                it = repositories.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        
+        updateRepositoryTree();
+        saveRepositories();
+        logMessage(QString("Removed all repositories from directory: %1").arg(dirPath));
+    }
+}
+
+void FetchDeeznutzWindow::showContextMenu(const QPoint& pos)
+{
+    QTreeWidgetItem* item = repositoryTree->itemAt(pos);
+    if (!item) return;
+
+    // Get the actions from the context menu
+    QList<QAction*> actions = contextMenu->actions();
+    QAction* removeRepoAction = actions[0]; // "Remove Repository"
+    QAction* removeDirAction = actions[1];  // "Remove Directory"
+
+    // Check if this is a repository item or directory item
+    GitRepository* repo = getRepositoryFromTreeItem(item);
+    if (repo) {
+        // It's a repository item
+        removeRepoAction->setVisible(true);
+        removeDirAction->setVisible(false);
+        removeRepoAction->setText("Remove Repository");
+    } else {
+        // It's a directory item
+        removeRepoAction->setVisible(false);
+        removeDirAction->setVisible(true);
+        removeDirAction->setText("Remove Directory");
+    }
+
+    // Show the context menu
+    contextMenu->exec(repositoryTree->mapToGlobal(pos));
 }
 
 void FetchDeeznutzWindow::fetchSelected()
