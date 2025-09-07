@@ -411,6 +411,7 @@ void FetchDeeznutzWindow::setupUI()
     repositoryTree->setHeaderLabel("Repositories");
     repositoryTree->setRootIsDecorated(true);
     repositoryTree->setAlternatingRowColors(true);
+    // Tooltips are set directly on tree items
     connect(repositoryTree, &QTreeWidget::itemSelectionChanged, this, &FetchDeeznutzWindow::onRepositorySelectionChanged);
     repoLayout->addWidget(repositoryTree);
 
@@ -728,6 +729,10 @@ void FetchDeeznutzWindow::updateRepositoryTree()
             QTreeWidgetItem* repoItem = new QTreeWidgetItem(pathItem);
             repoItem->setText(0, itemText);
             repoItem->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(repo)));
+            
+            // Set tooltip for the repository item
+            QString tooltip = generateRepositoryTooltip(*repo);
+            repoItem->setToolTip(0, tooltip);
         }
     }
 
@@ -1302,6 +1307,53 @@ QString FetchDeeznutzWindow::getRepositoryBranch(const QString& path)
     return branch;
 }
 
+QString FetchDeeznutzWindow::generateRepositoryTooltip(const GitRepository& repo)
+{
+    QString tooltip = QString("<b>%1</b><br/>").arg(repo.name);
+    tooltip += QString("Path: %1<br/>").arg(repo.localPath);
+    tooltip += QString("Branch: %1<br/>").arg(repo.branch);
+    tooltip += QString("Status: %1<br/>").arg(repo.status.isEmpty() ? "Ready" : repo.status);
+    
+    if (!repo.lastFetch.isEmpty()) {
+        tooltip += QString("Last Fetch: %1<br/>").arg(repo.lastFetch);
+    }
+    
+    tooltip += QString("Fetch Interval: %1 minutes<br/>").arg(repo.fetchInterval);
+    tooltip += QString("Enabled: %1<br/><br/>").arg(repo.enabled ? "Yes" : "No");
+    
+    if (repo.remotes.isEmpty()) {
+        tooltip += "<b>No remotes configured</b>";
+    } else {
+        tooltip += QString("<b>Remotes (%1):</b><br/>").arg(repo.remotes.size());
+        for (const GitRemote& remote : repo.remotes) {
+            tooltip += QString("• <b>%1</b><br/>").arg(remote.name);
+            tooltip += QString("  URL: %1<br/>").arg(remote.url);
+            tooltip += QString("  Status: %1<br/>").arg(remote.status.isEmpty() ? "Ready" : remote.status);
+            
+            if (remote.commitsAhead > 0 || remote.commitsBehind > 0) {
+                tooltip += QString("  Commits: ");
+                if (remote.commitsAhead > 0) {
+                    tooltip += QString("+%1 ahead").arg(remote.commitsAhead);
+                }
+                if (remote.commitsAhead > 0 && remote.commitsBehind > 0) {
+                    tooltip += ", ";
+                }
+                if (remote.commitsBehind > 0) {
+                    tooltip += QString("-%1 behind").arg(remote.commitsBehind);
+                }
+                tooltip += "<br/>";
+            }
+            
+            if (!remote.lastFetch.isEmpty()) {
+                tooltip += QString("  Last Fetch: %1<br/>").arg(remote.lastFetch);
+            }
+            tooltip += "<br/>";
+        }
+    }
+    
+    return tooltip;
+}
+
 void FetchDeeznutzWindow::onBackgroundFetchStarted(const QString& repoName)
 {
     logMessage(QString("🔄 Started fetching: %1").arg(repoName));
@@ -1410,4 +1462,5 @@ void FetchDeeznutzWindow::onBackgroundFetchError(const QString& repoName, const 
     updateRepositoryTree();
     saveRepositories();
 }
+
 

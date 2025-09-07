@@ -242,6 +242,7 @@ private:
     QString getRepositoryName(const QString& path);
     QList<GitRemote> getRepositoryRemotes(const QString& path);
     QString getRepositoryBranch(const QString& path);
+    QString generateRepositoryTooltip(const GitRepository& repo);
 
     QTreeWidget *repositoryTree;
     QPushButton *addButton;
