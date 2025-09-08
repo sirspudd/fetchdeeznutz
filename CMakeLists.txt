@@ -68,25 +68,25 @@ set_target_properties(fetchdeeznuts PROPERTIES
 include(GNUInstallDirs)
 
 # Find ImageMagick for icon generation
-find_program(IMAGEMAGICK_CONVERT convert)
-if(IMAGEMAGICK_CONVERT)
-    # Create PNG icons from SVG
-    add_custom_target(generate_icons
-        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 16x16 fetchdeeznuts-16.png
-        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 24x24 fetchdeeznuts-24.png
-        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 32x32 fetchdeeznuts-32.png
-        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 48x48 fetchdeeznuts-48.png
-        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 64x64 fetchdeeznuts-64.png
-        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 128x128 fetchdeeznuts-128.png
-        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 256x256 fetchdeeznuts-256.png
-        DEPENDS nuts_icon.svg
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Generating PNG icons from SVG"
-    )
-    add_dependencies(fetchdeeznuts generate_icons)
-else()
-    message(STATUS "ImageMagick not found - PNG icons will not be generated")
-endif()
+#find_program(IMAGEMAGICK_CONVERT convert)
+#if(IMAGEMAGICK_CONVERT)
+#    # Create PNG icons from SVG
+#    add_custom_target(generate_icons
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 16x16 fetchdeeznuts-16.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 24x24 fetchdeeznuts-24.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 32x32 fetchdeeznuts-32.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 48x48 fetchdeeznuts-48.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 64x64 fetchdeeznuts-64.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 128x128 fetchdeeznuts-128.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 256x256 fetchdeeznuts-256.png
+#        DEPENDS nuts_icon.svg
+#        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+#        COMMENT "Generating PNG icons from SVG"
+#    )
+#    add_dependencies(fetchdeeznuts generate_icons)
+#else()
+#    message(STATUS "ImageMagick not found - PNG icons will not be generated")
+#endif()
 
 # Install the executable
 install(TARGETS fetchdeeznuts
