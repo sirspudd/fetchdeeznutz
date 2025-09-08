@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=FetchDeezNutz
+Comment=Git Repository Manager with Background Fetching
+Exec=/opt/dev/src/spudd/fetchdeeznuts/build/fetchdeeznuts
+Icon=/opt/dev/src/spudd/fetchdeeznuts/nuts_icon.svg
+Terminal=false
+StartupNotify=true
+Categories=Development;VersionControl;
+Keywords=git;repository;fetch;version;control;
+StartupWMClass=fetchdeeznuts
+MimeType=
+Path=/opt/dev/src/spudd/fetchdeeznuts

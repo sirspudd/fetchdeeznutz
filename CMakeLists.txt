@@ -66,11 +66,96 @@ set_target_properties(fetchdeeznuts PROPERTIES
 )
 
 include(GNUInstallDirs)
+
+# Find ImageMagick for icon generation
+find_program(IMAGEMAGICK_CONVERT convert)
+if(IMAGEMAGICK_CONVERT)
+    # Create PNG icons from SVG
+    add_custom_target(generate_icons
+        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 16x16 fetchdeeznuts-16.png
+        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 24x24 fetchdeeznuts-24.png
+        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 32x32 fetchdeeznuts-32.png
+        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 48x48 fetchdeeznuts-48.png
+        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 64x64 fetchdeeznuts-64.png
+        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 128x128 fetchdeeznuts-128.png
+        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 256x256 fetchdeeznuts-256.png
+        DEPENDS nuts_icon.svg
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating PNG icons from SVG"
+    )
+    add_dependencies(fetchdeeznuts generate_icons)
+else()
+    message(STATUS "ImageMagick not found - PNG icons will not be generated")
+endif()
+
+# Install the executable
 install(TARGETS fetchdeeznuts
     BUNDLE DESTINATION .
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# Install desktop file
+install(FILES fetchdeeznuts-install.desktop
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
+    RENAME fetchdeeznuts.desktop
+)
+
+# Install icons
+install(FILES nuts_icon.svg
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+    RENAME fetchdeeznuts.svg
+)
+
+# Install PNG icons if they exist
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-16.png)
+    install(FILES fetchdeeznuts-16.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps
+        RENAME fetchdeeznuts.png
+    )
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-24.png)
+    install(FILES fetchdeeznuts-24.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/24x24/apps
+        RENAME fetchdeeznuts.png
+    )
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-32.png)
+    install(FILES fetchdeeznuts-32.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps
+        RENAME fetchdeeznuts.png
+    )
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-48.png)
+    install(FILES fetchdeeznuts-48.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48/apps
+        RENAME fetchdeeznuts.png
+    )
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-64.png)
+    install(FILES fetchdeeznuts-64.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps
+        RENAME fetchdeeznuts.png
+    )
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-128.png)
+    install(FILES fetchdeeznuts-128.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps
+        RENAME fetchdeeznuts.png
+    )
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-256.png)
+    install(FILES fetchdeeznuts-256.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
+        RENAME fetchdeeznuts.png
+    )
+endif()
 
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(fetchdeeznuts)
