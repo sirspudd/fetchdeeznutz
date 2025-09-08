@@ -1,70 +1,98 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Professional blue gradient -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a8a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Orange accent for the nut -->
+    <linearGradient id="nutGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f97316;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ea580c;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- White arrows -->
+    <linearGradient id="arrowGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f8fafc;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Subtle shadow -->
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
   <!-- Background circle -->
-  <circle cx="32" cy="32" r="30" fill="#2c3e50" stroke="#34495e" stroke-width="2"/>
+  <circle cx="32" cy="32" r="30" fill="url(#bgGradient)" stroke="#1d4ed8" stroke-width="1"/>
   
-  <!-- Nut 1 (top-left) -->
-  <g transform="translate(16, 12)">
-    <ellipse cx="0" cy="0" rx="8" ry="6" fill="#8b4513" stroke="#654321" stroke-width="1"/>
-    <ellipse cx="0" cy="0" rx="6" ry="4" fill="#a0522d"/>
-    <circle cx="0" cy="0" r="2" fill="#654321"/>
+  <!-- Central nut (clean hexagonal design) -->
+  <g transform="translate(32, 32)">
+    <!-- Nut body -->
+    <polygon points="-9,-6 -9,6 -5,10 5,10 9,6 9,-6 5,-10 -5,-10" 
+              fill="url(#nutGradient)" 
+              stroke="#dc2626" 
+              stroke-width="1"
+              filter="url(#shadow)"/>
+    
+    <!-- Nut hole -->
+    <circle cx="0" cy="0" r="3.5" fill="#1e3a8a"/>
+    
+    <!-- Nut threads (subtle) -->
+    <line x1="-6" y1="-3" x2="6" y2="-3" stroke="#dc2626" stroke-width="0.5" opacity="0.4"/>
+    <line x1="-6" y1="0" x2="6" y2="0" stroke="#dc2626" stroke-width="0.5" opacity="0.4"/>
+    <line x1="-6" y1="3" x2="6" y2="3" stroke="#dc2626" stroke-width="0.5" opacity="0.4"/>
   </g>
   
-  <!-- Nut 2 (top-right) -->
-  <g transform="translate(48, 16)">
-    <ellipse cx="0" cy="0" rx="7" ry="5" fill="#8b4513" stroke="#654321" stroke-width="1"/>
-    <ellipse cx="0" cy="0" rx="5" ry="3" fill="#a0522d"/>
-    <circle cx="0" cy="0" r="1.5" fill="#654321"/>
+  <!-- Git fetch arrows (clean and modern) -->
+  <g transform="translate(32, 32)">
+    <!-- Arrow 1 (top) -->
+    <g transform="translate(0, -18)">
+      <path d="M-2.5,-1.5 L2.5,0 L-2.5,1.5 L-1,0 Z" fill="url(#arrowGradient)"/>
+      <line x1="2.5" y1="0" x2="5" y2="0" stroke="url(#arrowGradient)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    
+    <!-- Arrow 2 (right) -->
+    <g transform="translate(18, 0) rotate(90)">
+      <path d="M-2.5,-1.5 L2.5,0 L-2.5,1.5 L-1,0 Z" fill="url(#arrowGradient)"/>
+      <line x1="2.5" y1="0" x2="5" y2="0" stroke="url(#arrowGradient)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    
+    <!-- Arrow 3 (bottom) -->
+    <g transform="translate(0, 18) rotate(180)">
+      <path d="M-2.5,-1.5 L2.5,0 L-2.5,1.5 L-1,0 Z" fill="url(#arrowGradient)"/>
+      <line x1="2.5" y1="0" x2="5" y2="0" stroke="url(#arrowGradient)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    
+    <!-- Arrow 4 (left) -->
+    <g transform="translate(-18, 0) rotate(270)">
+      <path d="M-2.5,-1.5 L2.5,0 L-2.5,1.5 L-1,0 Z" fill="url(#arrowGradient)"/>
+      <line x1="2.5" y1="0" x2="5" y2="0" stroke="url(#arrowGradient)" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
   </g>
   
-  <!-- Nut 3 (center-left) -->
-  <g transform="translate(12, 32)">
-    <ellipse cx="0" cy="0" rx="9" ry="7" fill="#8b4513" stroke="#654321" stroke-width="1"/>
-    <ellipse cx="0" cy="0" rx="7" ry="5" fill="#a0522d"/>
-    <circle cx="0" cy="0" r="2.5" fill="#654321"/>
+  <!-- Connection lines -->
+  <g transform="translate(32, 32)">
+    <line x1="0" y1="-18" x2="0" y2="-10" stroke="url(#arrowGradient)" stroke-width="1" opacity="0.7"/>
+    <line x1="18" y1="0" x2="10" y2="0" stroke="url(#arrowGradient)" stroke-width="1" opacity="0.7"/>
+    <line x1="0" y1="18" x2="0" y2="10" stroke="url(#arrowGradient)" stroke-width="1" opacity="0.7"/>
+    <line x1="-18" y1="0" x2="-10" y2="0" stroke="url(#arrowGradient)" stroke-width="1" opacity="0.7"/>
   </g>
   
-  <!-- Nut 4 (center) -->
-  <g transform="translate(32, 28)">
-    <ellipse cx="0" cy="0" rx="10" ry="8" fill="#8b4513" stroke="#654321" stroke-width="1"/>
-    <ellipse cx="0" cy="0" rx="8" ry="6" fill="#a0522d"/>
-    <circle cx="0" cy="0" r="3" fill="#654321"/>
-  </g>
-  
-  <!-- Nut 5 (center-right) -->
-  <g transform="translate(52, 36)">
-    <ellipse cx="0" cy="0" rx="8" ry="6" fill="#8b4513" stroke="#654321" stroke-width="1"/>
-    <ellipse cx="0" cy="0" rx="6" ry="4" fill="#a0522d"/>
-    <circle cx="0" cy="0" r="2" fill="#654321"/>
-  </g>
-  
-  <!-- Nut 6 (bottom-left) -->
-  <g transform="translate(20, 48)">
-    <ellipse cx="0" cy="0" rx="7" ry="5" fill="#8b4513" stroke="#654321" stroke-width="1"/>
-    <ellipse cx="0" cy="0" rx="5" ry="3" fill="#a0522d"/>
-    <circle cx="0" cy="0" r="1.5" fill="#654321"/>
-  </g>
-  
-  <!-- Nut 7 (bottom-right) -->
-  <g transform="translate(44, 52)">
-    <ellipse cx="0" cy="0" rx="6" ry="4" fill="#8b4513" stroke="#654321" stroke-width="1"/>
-    <ellipse cx="0" cy="0" rx="4" ry="2.5" fill="#a0522d"/>
-    <circle cx="0" cy="0" r="1" fill="#654321"/>
-  </g>
-  
-  <!-- Small decorative nuts scattered around -->
-  <g transform="translate(28, 16)">
-    <ellipse cx="0" cy="0" rx="3" ry="2" fill="#8b4513"/>
-    <circle cx="0" cy="0" r="1" fill="#654321"/>
-  </g>
-  
-  <g transform="translate(40, 44)">
-    <ellipse cx="0" cy="0" rx="2.5" ry="1.5" fill="#8b4513"/>
-    <circle cx="0" cy="0" r="0.8" fill="#654321"/>
-  </g>
-  
-  <g transform="translate(56, 28)">
-    <ellipse cx="0" cy="0" rx="2" ry="1.5" fill="#8b4513"/>
-    <circle cx="0" cy="0" r="0.6" fill="#654321"/>
+  <!-- Repository status indicators -->
+  <g transform="translate(32, 32)">
+    <!-- Active repositories (green) -->
+    <circle cx="0" cy="-24" r="1.5" fill="#10b981" opacity="0.9"/>
+    <circle cx="17" cy="-17" r="1" fill="#10b981" opacity="0.7"/>
+    <circle cx="24" cy="0" r="1.5" fill="#10b981" opacity="0.9"/>
+    <circle cx="17" cy="17" r="1" fill="#10b981" opacity="0.7"/>
+    
+    <!-- Inactive repositories (gray) -->
+    <circle cx="0" cy="24" r="1.5" fill="#6b7280" opacity="0.6"/>
+    <circle cx="-17" cy="17" r="1" fill="#6b7280" opacity="0.4"/>
+    <circle cx="-24" cy="0" r="1.5" fill="#6b7280" opacity="0.6"/>
+    <circle cx="-17" cy="-17" r="1" fill="#6b7280" opacity="0.4"/>
   </g>
 </svg>
