@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#2c3e50" stroke="#34495e" stroke-width="2"/>
+  
+  <!-- Nut 1 (top-left) -->
+  <g transform="translate(16, 12)">
+    <ellipse cx="0" cy="0" rx="8" ry="6" fill="#8b4513" stroke="#654321" stroke-width="1"/>
+    <ellipse cx="0" cy="0" rx="6" ry="4" fill="#a0522d"/>
+    <circle cx="0" cy="0" r="2" fill="#654321"/>
+  </g>
+  
+  <!-- Nut 2 (top-right) -->
+  <g transform="translate(48, 16)">
+    <ellipse cx="0" cy="0" rx="7" ry="5" fill="#8b4513" stroke="#654321" stroke-width="1"/>
+    <ellipse cx="0" cy="0" rx="5" ry="3" fill="#a0522d"/>
+    <circle cx="0" cy="0" r="1.5" fill="#654321"/>
+  </g>
+  
+  <!-- Nut 3 (center-left) -->
+  <g transform="translate(12, 32)">
+    <ellipse cx="0" cy="0" rx="9" ry="7" fill="#8b4513" stroke="#654321" stroke-width="1"/>
+    <ellipse cx="0" cy="0" rx="7" ry="5" fill="#a0522d"/>
+    <circle cx="0" cy="0" r="2.5" fill="#654321"/>
+  </g>
+  
+  <!-- Nut 4 (center) -->
+  <g transform="translate(32, 28)">
+    <ellipse cx="0" cy="0" rx="10" ry="8" fill="#8b4513" stroke="#654321" stroke-width="1"/>
+    <ellipse cx="0" cy="0" rx="8" ry="6" fill="#a0522d"/>
+    <circle cx="0" cy="0" r="3" fill="#654321"/>
+  </g>
+  
+  <!-- Nut 5 (center-right) -->
+  <g transform="translate(52, 36)">
+    <ellipse cx="0" cy="0" rx="8" ry="6" fill="#8b4513" stroke="#654321" stroke-width="1"/>
+    <ellipse cx="0" cy="0" rx="6" ry="4" fill="#a0522d"/>
+    <circle cx="0" cy="0" r="2" fill="#654321"/>
+  </g>
+  
+  <!-- Nut 6 (bottom-left) -->
+  <g transform="translate(20, 48)">
+    <ellipse cx="0" cy="0" rx="7" ry="5" fill="#8b4513" stroke="#654321" stroke-width="1"/>
+    <ellipse cx="0" cy="0" rx="5" ry="3" fill="#a0522d"/>
+    <circle cx="0" cy="0" r="1.5" fill="#654321"/>
+  </g>
+  
+  <!-- Nut 7 (bottom-right) -->
+  <g transform="translate(44, 52)">
+    <ellipse cx="0" cy="0" rx="6" ry="4" fill="#8b4513" stroke="#654321" stroke-width="1"/>
+    <ellipse cx="0" cy="0" rx="4" ry="2.5" fill="#a0522d"/>
+    <circle cx="0" cy="0" r="1" fill="#654321"/>
+  </g>
+  
+  <!-- Small decorative nuts scattered around -->
+  <g transform="translate(28, 16)">
+    <ellipse cx="0" cy="0" rx="3" ry="2" fill="#8b4513"/>
+    <circle cx="0" cy="0" r="1" fill="#654321"/>
+  </g>
+  
+  <g transform="translate(40, 44)">
+    <ellipse cx="0" cy="0" rx="2.5" ry="1.5" fill="#8b4513"/>
+    <circle cx="0" cy="0" r="0.8" fill="#654321"/>
+  </g>
+  
+  <g transform="translate(56, 28)">
+    <ellipse cx="0" cy="0" rx="2" ry="1.5" fill="#8b4513"/>
+    <circle cx="0" cy="0" r="0.6" fill="#654321"/>
+  </g>
+</svg>
