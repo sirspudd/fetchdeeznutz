@@ -2,6 +2,95 @@
 
 A Qt-based graphical application for managing and automatically fetching multiple Git repositories.
 
+This application largely written by Cursor with me acting as product manager. I have reviewed very little of the code so tread lightly, and use at your own risk.
+
+## Known issues
+
+* It was written by language model
+* the commit counts are horribly wrong and the app opts to show change delta from upstream by summing all the deltas between our repo and all its configured remotes.
+
+## Time investment
+
+* product development: 4 hours
+* QA: 1 hour
+* software dev: 40 min
+
+## Logo
+
+original logo was meant to be a collection of nuts
+
+current logo .... well here is the prompt/interation
+
+me: Could I please get a better logo for the project; your nuts image is pretty terrible
+
+cursor: You're absolutely right! Let me create a much better, more professional logo for FetchDeezNutz. I'll design something that's more polished and appropriate for a Git repository manager.
+
+:Cursor:
+
+✅ Professional Logo Design Complete
+🎨 New Logo Features:
+1. Professional Design Elements:
+Modern Color Scheme: Deep blue background with orange accent
+Clean Typography: Sharp, geometric shapes
+Professional Gradients: Subtle gradients for depth and modern appeal
+Consistent Styling: Cohesive design language throughout
+2. Git-Focused Concept:
+Central Nut: Represents the "nuts" part of the name with a clean hexagonal design
+Fetch Arrows: Four directional arrows representing Git fetch operations
+Repository Indicators: Small dots showing active/inactive repositories
+Connection Lines: Visual connections between the nut and fetch operations
+3. Technical Excellence:
+Scalable Vector: SVG format for perfect scaling at any size
+Multiple Sizes: Generated PNG versions for all standard icon sizes
+High Quality: Crisp rendering at all resolutions
+Professional Appearance: Suitable for business and development environments
+🎯 Design Philosophy:
+Color Palette:
+Primary Blue: #1e3a8a to #1e40af (professional, trustworthy)
+Accent Orange: #f97316 to #ea580c (energetic, Git-inspired)
+White Elements: Clean arrows and connections
+Status Colors: Green for active, gray for inactive repositories
+Visual Elements:
+Hexagonal Nut: Modern, technical appearance
+Directional Arrows: Clear representation of fetch operations
+Repository Dots: Visual status indicators
+Subtle Shadows: Depth and professionalism
+�� Files Created:
+fetchdeeznuts_logo_v3.svg: The final professional logo
+nuts_icon.svg: Updated with the new design
+PNG Icons: All standard sizes (16x16 to 256x256)
+Alternative Versions: fetchdeeznuts_logo.svg and fetchdeeznuts_logo_v2.svg for comparison
+🔧 Integration:
+Application Integration:
+System Tray: Uses the new professional logo
+Desktop File: References the updated icon
+CMake Build: Automatically generates PNG versions
+Resource System: Embedded in Qt resource system
+Installation Ready:
+Desktop Integration: Proper icon theme integration
+Multiple Formats: SVG and PNG for maximum compatibility
+Standard Locations: Follows Linux desktop standards
+Professional Appearance: Suitable for any desktop environment
+🎨 Logo Evolution:
+Before (Old Design):
+Basic brown nuts scattered around
+No clear Git concept
+Amateur appearance
+Poor scalability
+After (New Design):
+Professional blue and orange color scheme
+Clear Git fetch concept with arrows
+Modern, clean design
+Perfect scalability and clarity
+�� Benefits:
+✅ Professional Appearance: Suitable for business environments
+✅ Clear Concept: Immediately communicates Git fetching functionality
+✅ Modern Design: Follows current design trends
+✅ Technical Excellence: Perfect rendering at all sizes
+✅ Brand Recognition: Memorable and distinctive
+✅ Cross-Platform: Works beautifully on all desktop environments
+The new logo transforms FetchDeezNutz from having an amateur appearance to looking like a professional, enterprise-ready Git repository management tool. The design clearly communicates the application's purpose while maintaining the playful "nuts" reference in a sophisticated way!
+
 ## Features
 
 - **Graphical Repository Management**: Add, edit, and remove Git repositories through an intuitive GUI
