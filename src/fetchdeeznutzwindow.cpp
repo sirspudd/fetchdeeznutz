@@ -604,10 +604,12 @@ void FetchDeeznutzWindow::onCommitCountsUpdated(const QString& repoName, const Q
 
 void FetchDeeznutzWindow::onTrayIconActivated(QSystemTrayIcon::ActivationReason reason)
 {
-    if (reason == QSystemTrayIcon::DoubleClick) {
-        if (isVisible()) {
+    // Handle both single click (Trigger) and double click
+    if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
+        if (isVisible() && !isMinimized()) {
             hide();
         } else {
+            setWindowState(Qt::WindowNoState);
             show();
             raise();
             activateWindow();
@@ -617,6 +619,7 @@ void FetchDeeznutzWindow::onTrayIconActivated(QSystemTrayIcon::ActivationReason 
 
 void FetchDeeznutzWindow::showWindow()
 {
+    setWindowState(Qt::WindowNoState);
     show();
     raise();
     activateWindow();
