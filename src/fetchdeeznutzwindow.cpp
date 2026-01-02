@@ -20,6 +20,9 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     , currentFetchIndex(-1)
     , isFetching(false)
 {
+    // Initialize libgit2 FIRST - before any git operations
+    git_libgit2_init();
+    
     setWindowTitle("Git Repository Fetcher");
     setMinimumSize(800, 600);
 
@@ -61,9 +64,6 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
 
     // Connect timer for scheduled fetching
     connect(fetchTimer, &QTimer::timeout, this, &FetchDeeznutzWindow::performScheduledFetch);
-
-    // Initialize libgit2
-    git_libgit2_init();
 
     // Start with a 1-minute timer
     fetchTimer->start(60000); // 60 seconds
@@ -836,8 +836,14 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
         return;
     }
 
+    logMessage(QString("DEBUG: Repository %1 has %2 remotes, branch: %3").arg(repo.name).arg(repo.remotes.size()).arg(repo.branch));
     for (GitRemote& remote : repo.remotes) {
+        logMessage(QString("DEBUG: Calculating for remote %1/%2").arg(repo.name, remote.name));
         GitUtils::calculateRemoteCommitCounts(repository, remote, repo.branch, repo.name);
+        logMessage(QString("Commit counts for %1/%2: +%3/-%4")
+                   .arg(repo.name, remote.name)
+                   .arg(remote.commitsAhead)
+                   .arg(remote.commitsBehind));
     }
 
     {

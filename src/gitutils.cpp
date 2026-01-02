@@ -266,8 +266,7 @@ QString getRepositoryBranch(const QString& path) {
 }
 
 void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName) {
-    qDebug() << "Calculating commit counts for" << repoName << "remote" << remote.name << "branch" << branch;
-    
+    Q_UNUSED(repoName);
     QMutexLocker locker(&g_gitMutex);
     
     // Get the local branch reference
@@ -276,11 +275,9 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
     int error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
 
     if (error < 0) {
-        qDebug() << "Local branch" << localBranchRef << "not found, trying HEAD";
         // Local branch doesn't exist, try HEAD
         error = git_repository_head(&localBranch, repository);
         if (error < 0) {
-            qDebug() << "No HEAD found, setting counts to 0";
             remote.commitsAhead = 0;
             remote.commitsBehind = 0;
             return;
@@ -290,7 +287,6 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
     // Try to get the upstream tracking branch first (this is the most accurate)
     git_reference *remoteBranch = nullptr;
     git_reference *upstream = nullptr;
-    bool usingUpstream = false;
     
     // Check if this is a branch reference (not just any reference)
     if (git_reference_is_branch(localBranch)) {
@@ -301,16 +297,12 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
             const char *upstreamRefName = git_reference_name(upstream);
             if (upstreamRefName) {
                 QString upstreamRefStr = QString::fromUtf8(upstreamRefName);
-                qDebug() << "Branch has upstream:" << upstreamRefStr;
                 // Upstream ref format is "refs/remotes/remote/branch" (e.g., "refs/remotes/origin/master")
                 QString expectedPrefix = QString("refs/remotes/%1/").arg(remote.name);
                 if (upstreamRefStr.startsWith(expectedPrefix)) {
                     remoteBranch = upstream;
                     upstream = nullptr; // Don't free it, we're using it
-                    usingUpstream = true;
-                    qDebug() << "Using upstream tracking branch:" << upstreamRefStr << "for remote" << remote.name;
                 } else {
-                    qDebug() << "Upstream" << upstreamRefStr << "does not match remote" << remote.name << "- will try manual lookup";
                     git_reference_free(upstream);
                     upstream = nullptr;
                 }
@@ -318,8 +310,6 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
                 git_reference_free(upstream);
                 upstream = nullptr;
             }
-        } else {
-            qDebug() << "No upstream tracking branch configured for" << branch;
         }
     }
     
@@ -329,28 +319,22 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
         error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
 
         if (error < 0) {
-            qDebug() << "Remote branch" << remoteBranchRef << "not found, trying alternatives";
-            
             // Try the remote's default branch (usually main or master)
             QStringList defaultBranches = {"main", "master", "develop"};
             for (const QString& defaultBranch : defaultBranches) {
                 remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, defaultBranch);
                 error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
                 if (error >= 0) {
-                    qDebug() << "Found remote branch" << remoteBranchRef;
                     break;
                 }
             }
             
             if (error < 0) {
-                qDebug() << "No remote branch found for remote" << remote.name << ", setting counts to 0";
                 git_reference_free(localBranch);
                 remote.commitsAhead = 0;
                 remote.commitsBehind = 0;
                 return;
             }
-        } else {
-            qDebug() << "Found remote branch" << remoteBranchRef;
         }
     }
 
@@ -360,7 +344,6 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
 
     error = git_commit_lookup(&localCommit, repository, git_reference_target(localBranch));
     if (error < 0) {
-        qDebug() << "Failed to lookup local commit";
         git_reference_free(localBranch);
         git_reference_free(remoteBranch);
         remote.commitsAhead = 0;
@@ -370,7 +353,6 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
 
     error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
     if (error < 0) {
-        qDebug() << "Failed to lookup remote commit";
         git_commit_free(localCommit);
         git_reference_free(localBranch);
         git_reference_free(remoteBranch);
@@ -381,7 +363,6 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
 
     // Check if commits are the same
     if (git_oid_equal(git_commit_id(localCommit), git_commit_id(remoteCommit))) {
-        qDebug() << "Local and remote commits are the same";
         remote.commitsAhead = 0;
         remote.commitsBehind = 0;
         git_commit_free(localCommit);
@@ -391,21 +372,10 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
         return;
     }
 
-    // Get commit OIDs for debugging
-    const git_oid *localOid = git_commit_id(localCommit);
-    const git_oid *remoteOid = git_commit_id(remoteCommit);
-    char localOidStr[GIT_OID_HEXSZ + 1];
-    char remoteOidStr[GIT_OID_HEXSZ + 1];
-    git_oid_tostr(localOidStr, GIT_OID_HEXSZ + 1, localOid);
-    git_oid_tostr(remoteOidStr, GIT_OID_HEXSZ + 1, remoteOid);
-    qDebug() << "Local commit:" << localOidStr;
-    qDebug() << "Remote commit:" << remoteOidStr;
-
     // Calculate ahead/behind counts using a more reliable method
     git_revwalk *walk = nullptr;
     error = git_revwalk_new(&walk, repository);
     if (error < 0) {
-        qDebug() << "Failed to create revwalk";
         git_commit_free(localCommit);
         git_commit_free(remoteCommit);
         git_reference_free(localBranch);
@@ -427,7 +397,7 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
     while (git_revwalk_next(&oid, walk) == 0) {
         ahead++;
     }
-    qDebug() << "Commits ahead (local not in remote):" << ahead;
+    qWarning() << "Commits ahead (local not in remote):" << ahead;
 
     // Count commits behind (in remote but not in local)
     git_revwalk_reset(walk);
@@ -438,9 +408,8 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
     while (git_revwalk_next(&oid, walk) == 0) {
         behind++;
     }
-    qDebug() << "Commits behind (remote not in local):" << behind;
+    qWarning() << "Commits behind (remote not in local):" << behind;
 
-    qDebug() << "Final commit counts for" << repoName << "remote" << remote.name << "- Ahead:" << ahead << "Behind:" << behind;
 
     remote.commitsAhead = ahead;
     remote.commitsBehind = behind;
