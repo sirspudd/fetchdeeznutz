@@ -1190,13 +1190,13 @@ void FetchDeeznutzWindow::updateRepositoryTree()
                 commitDeltaText = " [up-to-date]";
             }
 
-            QString itemText = QString("%1 %2 - %3 (%4) [%5]%6")
+            // Repository item text (without aggregated commit counts)
+            QString itemText = QString("%1 %2 - %3 (%4) [%5 remotes]")
                               .arg(statusIcon)
                               .arg(repo->name)
                               .arg(statusText)
                               .arg(repo->branch)
-                              .arg(remotesText)
-                              .arg(commitDeltaText);
+                              .arg(repo->remotes.size());
 
             QTreeWidgetItem* repoItem = new QTreeWidgetItem(pathItem);
             repoItem->setText(0, itemText);
@@ -1205,6 +1205,54 @@ void FetchDeeznutzWindow::updateRepositoryTree()
             // Set tooltip for the repository item
             QString tooltip = generateRepositoryTooltip(*repo);
             repoItem->setToolTip(0, tooltip);
+            
+            // Add each remote as a child item with its own commit counts
+            for (const GitRemote& remote : repo->remotes) {
+                QString remoteStatusIcon = "●";
+                QString remoteStatus = remote.status.isEmpty() ? "Ready" : remote.status;
+                
+                if (remoteStatus == "Error") {
+                    remoteStatusIcon = "❌";
+                } else if (remoteStatus == "Success") {
+                    remoteStatusIcon = "✅";
+                } else if (remoteStatus == "Fetching...") {
+                    remoteStatusIcon = "🔄";
+                }
+                
+                QString remoteCommitDeltaText;
+                if (remote.commitsAhead > 0 && remote.commitsBehind > 0) {
+                    remoteCommitDeltaText = QString(" [+%1/-%2]").arg(remote.commitsAhead).arg(remote.commitsBehind);
+                } else if (remote.commitsAhead > 0) {
+                    remoteCommitDeltaText = QString(" [+%1]").arg(remote.commitsAhead);
+                } else if (remote.commitsBehind > 0) {
+                    remoteCommitDeltaText = QString(" [-%1]").arg(remote.commitsBehind);
+                } else {
+                    remoteCommitDeltaText = " [up-to-date]";
+                }
+                
+                QString remoteItemText = QString("%1 %2 - %3%4")
+                                        .arg(remoteStatusIcon)
+                                        .arg(remote.name)
+                                        .arg(remote.url)
+                                        .arg(remoteCommitDeltaText);
+                
+                QTreeWidgetItem* remoteItem = new QTreeWidgetItem(repoItem);
+                remoteItem->setText(0, remoteItemText);
+                // Store the repository pointer so we can find it from remote items
+                remoteItem->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(repo)));
+                
+                // Set tooltip with remote details
+                QString remoteTooltip = QString("Remote: %1\nURL: %2\nStatus: %3\nAhead: %4 commits\nBehind: %5 commits")
+                                       .arg(remote.name)
+                                       .arg(remote.url)
+                                       .arg(remoteStatus)
+                                       .arg(remote.commitsAhead)
+                                       .arg(remote.commitsBehind);
+                if (!remote.lastFetch.isEmpty()) {
+                    remoteTooltip += QString("\nLast fetch: %1").arg(remote.lastFetch);
+                }
+                remoteItem->setToolTip(0, remoteTooltip);
+            }
         }
     }
 
@@ -1598,9 +1646,24 @@ GitRepository* FetchDeeznutzWindow::getRepositoryFromTreeItem(QTreeWidgetItem* i
     if (data.isValid()) {
         void* ptr = data.value<void*>();
         if (ptr) {
+            // Check if this pointer matches any repository
+            for (GitRepository& repo : repositories) {
+                if (&repo == ptr) {
+                    return &repo;
+                }
+            }
+            // If not found, try casting (shouldn't happen, but be safe)
             return static_cast<GitRepository*>(ptr);
         }
     }
+    
+    // If no data or not a repository item, check if parent is a repository item
+    // (This handles remote items which are children of repository items)
+    QTreeWidgetItem* parent = item->parent();
+    if (parent) {
+        return getRepositoryFromTreeItem(parent);
+    }
+    
     return nullptr;
 }
 
@@ -1700,8 +1763,8 @@ void FetchDeeznutzWindow::saveRepositories()
         return;
     }
     
-    if (!tempFile.flush() || !tempFile.sync()) {
-        logMessage("Failed to save configuration: sync error");
+    if (!tempFile.flush()) {
+        logMessage("Failed to save configuration: flush error");
         tempFile.remove();
         return;
     }
