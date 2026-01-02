@@ -4,6 +4,9 @@
 // Custom error code for connection timeout
 #define GIT_ETIMEOUT -1000
 
+// Global mutex to serialize all libgit2 operations (libgit2 is not thread-safe)
+static QMutex g_gitMutex;
+
 GitFetchWorker::GitFetchWorker(QObject *parent)
     : QObject(parent)
     , m_stopRequested(false)
@@ -20,7 +23,11 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
 {
     m_stopRequested = false;
     emit fetchStarted(repo.name);
-    performFetch(repo);
+    
+    // Run fetch in parallel using QtConcurrent, but all git operations will be serialized by g_gitMutex
+    QtConcurrent::run([this, repo]() {
+        performFetch(repo);
+    });
 }
 
 void GitFetchWorker::stopFetching()
@@ -50,15 +57,19 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
         return;
     }
 
-    // Check if repository exists
+    // Check if repository exists (this doesn't need mutex as it's just file system check)
     if (!isRepositoryValid(repo.localPath)) {
         emit fetchError(repo.name, QString("Repository not found at: %1").arg(repo.localPath));
         return;
     }
 
-    // Open the repository
+    // Open the repository - protected by mutex
     git_repository *repository = nullptr;
-    int error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
+    int error;
+    {
+        QMutexLocker locker(&g_gitMutex);
+        error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
+    }
     if (error < 0) {
         emit fetchError(repo.name, getGitErrorMessage(error));
         return;
@@ -98,16 +109,19 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
         emit fetchProgress(repo.name, remote.name, (completedRemotes * 100) / totalRemotes);
 
         git_remote *git_remote = nullptr;
-        error = git_remote_lookup(&git_remote, repository, remote.name.toLocal8Bit().constData());
-        if (error < 0) {
-            // If remote doesn't exist, add it
-            error = git_remote_create(&git_remote, repository, remote.name.toLocal8Bit().constData(), remote.url.toLocal8Bit().constData());
+        {
+            QMutexLocker locker(&g_gitMutex);
+            error = git_remote_lookup(&git_remote, repository, remote.name.toLocal8Bit().constData());
             if (error < 0) {
-                failedRemotes.append(remote.name);
-                allSuccessful = false;
-                completedRemotes++;
-                continue;
+                // If remote doesn't exist, add it
+                error = git_remote_create(&git_remote, repository, remote.name.toLocal8Bit().constData(), remote.url.toLocal8Bit().constData());
             }
+        }
+        if (error < 0) {
+            failedRemotes.append(remote.name);
+            allSuccessful = false;
+            completedRemotes++;
+            continue;
         }
 
         // Fetch from remote
@@ -136,11 +150,17 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
             allSuccessful = false;
         }
 
-        git_remote_free(git_remote);
+        {
+            QMutexLocker locker(&g_gitMutex);
+            git_remote_free(git_remote);
+        }
         completedRemotes++;
     }
 
-    git_repository_free(repository);
+    {
+        QMutexLocker locker(&g_gitMutex);
+        git_repository_free(repository);
+    }
     timeoutTimer.stop();
 
     if (timeoutOccurred) {
@@ -200,6 +220,8 @@ int GitFetchWorker::sshKeyCallback(git_credential **out, const char *url, const 
 void GitFetchWorker::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName)
 {
     qDebug() << "Calculating commit counts for" << repoName << "remote" << remote.name << "branch" << branch;
+    
+    QMutexLocker locker(&g_gitMutex);
     
     // Get the local branch reference
     QString localBranchRef = QString("refs/heads/%1").arg(branch);
@@ -338,65 +360,37 @@ void GitFetchWorker::calculateRemoteCommitCounts(git_repository* repository, Git
     git_reference_free(localBranch);
     git_reference_free(remoteBranch);
 
-    // Emit signal with updated commit counts
+    // Emit signal with updated commit counts (outside mutex)
     emit commitCountsUpdated(repoName, remote.name, remote.commitsAhead, remote.commitsBehind);
 }
 
 bool GitFetchWorker::isRepositoryValid(const QString& path)
 {
     git_repository *repository = nullptr;
-    int error = git_repository_open(&repository, path.toLocal8Bit().constData());
+    int error;
+    {
+        QMutexLocker locker(&g_gitMutex);
+        error = git_repository_open(&repository, path.toLocal8Bit().constData());
+    }
 
     if (error < 0) {
         return false;
     }
 
-    git_repository_free(repository);
+    {
+        QMutexLocker locker(&g_gitMutex);
+        git_repository_free(repository);
+    }
     return true;
 }
 
 int GitFetchWorker::fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds)
 {
-    // libgit2 is NOT thread-safe, but git_remote_fetch() can block indefinitely.
-    // We use QtConcurrent::run() with a global mutex to serialize all git operations,
-    // ensuring thread safety while allowing timeout monitoring.
-    
-    static QMutex gitMutex; // Serialize all git operations to ensure thread safety
-    
-    // Create a future that runs the git fetch operation with mutex protection
-    QFuture<int> future = QtConcurrent::run([git_remote, fetch_opts]() -> int {
-        QMutexLocker locker(&gitMutex);
-        return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
-    });
-    
-    // Use QFutureWatcher to monitor the future with timeout
-    QFutureWatcher<int> watcher;
-    watcher.setFuture(future);
-    
-    // Create a timer for timeout
-    QTimer timeoutTimer;
-    timeoutTimer.setSingleShot(true);
-    timeoutTimer.setInterval(timeoutSeconds * 1000);
-    
-    // Use event loop to wait for completion or timeout
-    QEventLoop loop;
-    connect(&watcher, &QFutureWatcher<int>::finished, &loop, &QEventLoop::quit);
-    connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
-    
-    timeoutTimer.start();
-    loop.exec();
-    
-    if (timeoutTimer.isActive()) {
-        // Operation completed before timeout
-        timeoutTimer.stop();
-        return future.result();
-    } else {
-        // Timeout occurred - we can't actually cancel the git operation,
-        // but we can return a timeout error code
-        // Note: The git operation will continue running in the background thread
-        // but will be serialized by the mutex, so it won't interfere with other operations
-        return GIT_ETIMEOUT;
-    }
+    // All git operations must be protected by the global mutex for thread safety
+    // The timeoutSeconds parameter is kept for API compatibility but not used
+    // (libgit2 doesn't support cancelling operations mid-flight)
+    QMutexLocker locker(&g_gitMutex);
+    return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
 }
 
 RemoteSelectionDialog::RemoteSelectionDialog(const QList<GitRemote>& remotes, QWidget *parent)
@@ -1414,7 +1408,11 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
     }
 
     git_repository *repository = nullptr;
-    int error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
+    int error;
+    {
+        QMutexLocker locker(&g_gitMutex);
+        error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
+    }
     if (error < 0) {
         return;
     }
@@ -1423,13 +1421,18 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
         calculateRemoteCommitCounts(repository, remote, repo.branch, repo.name);
     }
 
-    git_repository_free(repository);
+    {
+        QMutexLocker locker(&g_gitMutex);
+        git_repository_free(repository);
+    }
     updateRepositoryTree();
 }
 
 void FetchDeeznutzWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName)
 {
     qDebug() << "Calculating commit counts for" << repoName << "remote" << remote.name << "branch" << branch;
+    
+    QMutexLocker locker(&g_gitMutex);
     
     // Get the local branch reference
     QString localBranchRef = QString("refs/heads/%1").arg(branch);
@@ -1616,19 +1619,51 @@ QString FetchDeeznutzWindow::getConfigFilePath() const
 
 void FetchDeeznutzWindow::loadRepositories()
 {
-    QFile file(getConfigFilePath());
+    QString configPath = getConfigFilePath();
+    QFile file(configPath);
     if (!file.open(QIODevice::ReadOnly)) {
         logMessage("No existing configuration found, starting fresh");
         return;
     }
 
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    QByteArray data = file.readAll();
+    file.close();
+    
+    if (data.isEmpty()) {
+        logMessage("Configuration file is empty, starting fresh");
+        return;
+    }
+
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+    
+    if (parseError.error != QJsonParseError::NoError) {
+        logMessage(QString("Failed to parse configuration file: %1 at offset %2")
+                   .arg(parseError.errorString())
+                   .arg(parseError.offset));
+        logMessage("Configuration file may be corrupted. Starting fresh.");
+        // Backup the corrupted file
+        QString backupPath = configPath + ".corrupted." + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
+        QFile::copy(configPath, backupPath);
+        logMessage(QString("Corrupted file backed up to: %1").arg(backupPath));
+        return;
+    }
+    
+    if (!doc.isArray()) {
+        logMessage("Configuration file format is invalid (expected array), starting fresh");
+        return;
+    }
+    
     QJsonArray array = doc.array();
 
     repositories.clear();
     for (const QJsonValue& value : array) {
         if (value.isObject()) {
-            repositories.append(GitRepository::fromJson(value.toObject()));
+            try {
+                repositories.append(GitRepository::fromJson(value.toObject()));
+            } catch (...) {
+                logMessage("Warning: Skipped invalid repository entry in configuration");
+            }
         }
     }
 
@@ -1648,13 +1683,43 @@ void FetchDeeznutzWindow::saveRepositories()
     }
 
     QJsonDocument doc(array);
-    QFile file(getConfigFilePath());
-    if (file.open(QIODevice::WriteOnly)) {
-        file.write(doc.toJson());
-        logMessage("Configuration saved");
-    } else {
-        logMessage("Failed to save configuration");
+    QString configPath = getConfigFilePath();
+    QString tempPath = configPath + ".tmp";
+    
+    // Write to temporary file first to avoid corruption if crash occurs
+    QFile tempFile(tempPath);
+    if (!tempFile.open(QIODevice::WriteOnly)) {
+        logMessage("Failed to save configuration: cannot create temporary file");
+        return;
     }
+    
+    QByteArray jsonData = doc.toJson();
+    if (tempFile.write(jsonData) != jsonData.size()) {
+        logMessage("Failed to save configuration: write error");
+        tempFile.remove();
+        return;
+    }
+    
+    if (!tempFile.flush() || !tempFile.sync()) {
+        logMessage("Failed to save configuration: sync error");
+        tempFile.remove();
+        return;
+    }
+    tempFile.close();
+    
+    // Atomically replace the original file with the temporary file
+    QFile oldFile(configPath);
+    if (oldFile.exists()) {
+        oldFile.remove();
+    }
+    
+    if (!QFile::rename(tempPath, configPath)) {
+        logMessage("Failed to save configuration: cannot replace file");
+        QFile::remove(tempPath);
+        return;
+    }
+    
+    logMessage("Configuration saved");
 }
 
 void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryPath)
