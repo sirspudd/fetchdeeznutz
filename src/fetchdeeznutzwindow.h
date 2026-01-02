@@ -34,6 +34,7 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QFormLayout>
+#include <QSettings>
 
 // Forward declarations
 struct git_repository;
@@ -96,6 +97,9 @@ private:
     void updateRepositoryTree();
     GitRepository* getRepositoryFromTreeItem(QTreeWidgetItem* item);
     QString generateRepositoryTooltip(const GitRepository& repo);
+    void loadSettings();
+    void saveSettings();
+    void updateAutoFetchControls();
     
     // Override close event to hide to tray
     void closeEvent(QCloseEvent *event) override;

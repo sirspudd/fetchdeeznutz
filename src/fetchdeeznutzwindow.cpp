@@ -49,20 +49,21 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchWorker, &GitFetchWorker::commitCountsUpdated, this, &FetchDeeznutzWindow::onCommitCountsUpdated);
     fetchThread->start();
     
-    // Set initial timeout values
-    QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, 300)); // 5 minutes default
-    QMetaObject::invokeMethod(fetchWorker, "setConnectionTimeout", Qt::QueuedConnection, Q_ARG(int, 5)); // 5 seconds default
+    // Initial timeout values will be set in loadSettings()
 
     setupUI();
     setupSystemTray();
+    loadSettings(); // Load settings before loading repositories
     loadRepositories();
     updateRepositoryTree();
 
     // Connect timer for scheduled fetching
     connect(fetchTimer, &QTimer::timeout, this, &FetchDeeznutzWindow::performScheduledFetch);
 
-    // Start with a 1-minute timer
-    fetchTimer->start(60000); // 60 seconds
+    // Start timer based on loaded settings
+    if (autoFetchCheckBox->isChecked()) {
+        fetchTimer->start(globalIntervalSpinBox->value() * 60000);
+    }
 }
 
 FetchDeeznutzWindow::~FetchDeeznutzWindow()
@@ -161,6 +162,9 @@ void FetchDeeznutzWindow::setupUI()
     autoFetchCheckBox = new QCheckBox("Enable Auto Fetch");
     autoFetchCheckBox->setChecked(true);
     connect(autoFetchCheckBox, &QCheckBox::toggled, this, &FetchDeeznutzWindow::onAutoFetchToggled);
+    
+    // Initially update the enabled state of interval controls (will be updated again in loadSettings)
+    updateAutoFetchControls();
 
     fetchAllButton = new QPushButton("Fetch All Now");
     connect(fetchAllButton, &QPushButton::clicked, this, &FetchDeeznutzWindow::fetchAll);
@@ -498,6 +502,7 @@ void FetchDeeznutzWindow::onRepositoryItemDoubleClicked(QTreeWidgetItem* item, i
 
 void FetchDeeznutzWindow::onFetchIntervalChanged()
 {
+    saveSettings(); // Save settings when changed
     if (autoFetchCheckBox->isChecked()) {
         fetchTimer->setInterval(globalIntervalSpinBox->value() * 60000);
         logMessage(QString("Auto-fetch interval changed to %1 minutes").arg(globalIntervalSpinBox->value()));
@@ -513,6 +518,7 @@ void FetchDeeznutzWindow::onFetchTimeoutChanged()
 
 void FetchDeeznutzWindow::onConnectionTimeoutChanged()
 {
+    saveSettings(); // Save settings when changed
     int timeoutSeconds = connectionTimeoutSpinBox->value();
     QMetaObject::invokeMethod(fetchWorker, "setConnectionTimeout", Qt::QueuedConnection, Q_ARG(int, timeoutSeconds));
     logMessage(QString("Connection timeout changed to %1 seconds").arg(timeoutSeconds));
@@ -520,6 +526,8 @@ void FetchDeeznutzWindow::onConnectionTimeoutChanged()
 
 void FetchDeeznutzWindow::onAutoFetchToggled()
 {
+    saveSettings(); // Save settings when changed
+    updateAutoFetchControls(); // Update enabled state of interval controls
     if (autoFetchCheckBox->isChecked()) {
         startScheduledFetch();
         logMessage("Auto-fetch enabled");
@@ -1037,6 +1045,52 @@ QString FetchDeeznutzWindow::getConfigFilePath() const
     QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     QDir().mkpath(configDir);
     return QDir(configDir).filePath("repositories.json");
+}
+
+void FetchDeeznutzWindow::loadSettings()
+{
+    QSettings settings;
+    
+    // Load global interval (default: 60 minutes)
+    int interval = settings.value("globalInterval", 60).toInt();
+    globalIntervalSpinBox->setValue(interval);
+    
+    // Load fetch timeout (default: 300 seconds = 5 minutes)
+    int fetchTimeout = settings.value("fetchTimeout", 300).toInt();
+    fetchTimeoutSpinBox->setValue(fetchTimeout);
+    QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, fetchTimeout));
+    
+    // Load connection timeout (default: 5 seconds)
+    int connectionTimeout = settings.value("connectionTimeout", 5).toInt();
+    connectionTimeoutSpinBox->setValue(connectionTimeout);
+    QMetaObject::invokeMethod(fetchWorker, "setConnectionTimeout", Qt::QueuedConnection, Q_ARG(int, connectionTimeout));
+    
+    // Load auto-fetch enabled state (default: true)
+    bool autoFetch = settings.value("autoFetchEnabled", true).toBool();
+    autoFetchCheckBox->setChecked(autoFetch);
+    
+    // Update enabled state of interval controls based on auto-fetch setting
+    updateAutoFetchControls();
+}
+
+void FetchDeeznutzWindow::saveSettings()
+{
+    QSettings settings;
+    
+    settings.setValue("globalInterval", globalIntervalSpinBox->value());
+    settings.setValue("fetchTimeout", fetchTimeoutSpinBox->value());
+    settings.setValue("connectionTimeout", connectionTimeoutSpinBox->value());
+    settings.setValue("autoFetchEnabled", autoFetchCheckBox->isChecked());
+    
+    settings.sync();
+}
+
+void FetchDeeznutzWindow::updateAutoFetchControls()
+{
+    bool autoFetchEnabled = autoFetchCheckBox->isChecked();
+    globalIntervalSpinBox->setEnabled(autoFetchEnabled);
+    fetchTimeoutSpinBox->setEnabled(autoFetchEnabled);
+    connectionTimeoutSpinBox->setEnabled(autoFetchEnabled);
 }
 
 void FetchDeeznutzWindow::loadRepositories()
