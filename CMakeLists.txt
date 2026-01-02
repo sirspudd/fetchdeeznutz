@@ -111,20 +111,46 @@ install(TARGETS fetchdeeznuts
 )
 
 # Strip installed executable and libraries
+# Note: DESTDIR is prepended to CMAKE_INSTALL_PREFIX during install
 install(CODE "
+    if(NOT CMAKE_STRIP)
+        find_program(STRIP_TOOL strip)
+        if(STRIP_TOOL)
+            set(CMAKE_STRIP \"\${STRIP_TOOL}\")
+        endif()
+    endif()
     if(CMAKE_STRIP)
-        set(BINARY_PATH \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/fetchdeeznuts\")
+        # Handle DESTDIR - it's prepended to CMAKE_INSTALL_PREFIX
+        set(DESTDIR_VALUE \"\$ENV{DESTDIR}\")
+        if(DESTDIR_VALUE)
+            # Remove trailing slash if present
+            string(REGEX REPLACE \"/+\$\" \"\" DESTDIR_VALUE \"\${DESTDIR_VALUE}\")
+            set(INSTALL_ROOT \"\${DESTDIR_VALUE}\${CMAKE_INSTALL_PREFIX}\")
+        else()
+            set(INSTALL_ROOT \"\${CMAKE_INSTALL_PREFIX}\")
+        endif()
+        set(BINARY_PATH \"\${INSTALL_ROOT}/${CMAKE_INSTALL_BINDIR}/fetchdeeznuts\")
+        message(STATUS \"Checking for binary at: \${BINARY_PATH}\")
         if(EXISTS \"\${BINARY_PATH}\")
             message(STATUS \"Stripping \${BINARY_PATH}\")
             execute_process(
                 COMMAND \"${CMAKE_STRIP}\" \"\${BINARY_PATH}\"
                 RESULT_VARIABLE STRIP_RESULT
+                OUTPUT_VARIABLE STRIP_OUTPUT
+                ERROR_VARIABLE STRIP_ERROR
             )
             if(STRIP_RESULT)
-                message(WARNING \"Failed to strip \${BINARY_PATH}\")
+                message(WARNING \"Failed to strip \${BINARY_PATH}: \${STRIP_RESULT}\")
+                if(STRIP_ERROR)
+                    message(WARNING \"Strip error: \${STRIP_ERROR}\")
+                endif()
+            else()
+                message(STATUS \"Successfully stripped \${BINARY_PATH}\")
             endif()
+        else()
+            message(WARNING \"Binary not found at \${BINARY_PATH}\")
         endif()
-        file(GLOB INSTALLED_LIBS \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/*.so*\")
+        file(GLOB INSTALLED_LIBS \"\${INSTALL_ROOT}/${CMAKE_INSTALL_LIBDIR}/*.so*\")
         foreach(LIB \${INSTALLED_LIBS})
             if(EXISTS \"\${LIB}\")
                 message(STATUS \"Stripping \${LIB}\")
