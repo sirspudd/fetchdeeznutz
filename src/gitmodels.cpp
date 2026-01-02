@@ -6,8 +6,7 @@ QJsonObject GitRemote::toJson() const {
     obj["url"] = url;
     obj["lastFetch"] = lastFetch;
     obj["status"] = status;
-    obj["commitsAhead"] = commitsAhead;
-    obj["commitsBehind"] = commitsBehind;
+    // Note: commitsAhead and commitsBehind are NOT saved - they are always calculated from the git repo
     return obj;
 }
 
@@ -17,8 +16,8 @@ GitRemote GitRemote::fromJson(const QJsonObject& obj) {
     remote.url = obj["url"].toString();
     remote.lastFetch = obj["lastFetch"].toString();
     remote.status = obj["status"].toString();
-    remote.commitsAhead = obj["commitsAhead"].toInt(0);
-    remote.commitsBehind = obj["commitsBehind"].toInt(0);
+    // Note: commitsAhead and commitsBehind are NOT loaded - they are always calculated from the git repo
+    // They default to 0 in the constructor and will be recalculated after loading
     return remote;
 }
 
