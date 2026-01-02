@@ -39,6 +39,7 @@
 #include <QFutureWatcher>
 #include <QEventLoop>
 #include <QtConcurrent>
+#include <QMutex>
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>

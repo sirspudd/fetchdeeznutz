@@ -357,14 +357,46 @@ bool GitFetchWorker::isRepositoryValid(const QString& path)
 
 int GitFetchWorker::fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds)
 {
-    // libgit2 is NOT thread-safe, so we must call git_remote_fetch directly
-    // in the worker thread (not via QtConcurrent which uses a thread pool).
-    // Since we're already in a background worker thread, we can call it directly.
-    // Note: We can't actually cancel a git operation once it starts, but we
-    // can at least ensure it runs in the correct thread context.
+    // libgit2 is NOT thread-safe, but git_remote_fetch() can block indefinitely.
+    // We use QtConcurrent::run() with a global mutex to serialize all git operations,
+    // ensuring thread safety while allowing timeout monitoring.
     
-    // Call git_remote_fetch directly - it's already running in the worker thread
-    return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
+    static QMutex gitMutex; // Serialize all git operations to ensure thread safety
+    
+    // Create a future that runs the git fetch operation with mutex protection
+    QFuture<int> future = QtConcurrent::run([git_remote, fetch_opts]() -> int {
+        QMutexLocker locker(&gitMutex);
+        return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
+    });
+    
+    // Use QFutureWatcher to monitor the future with timeout
+    QFutureWatcher<int> watcher;
+    watcher.setFuture(future);
+    
+    // Create a timer for timeout
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+    timeoutTimer.setInterval(timeoutSeconds * 1000);
+    
+    // Use event loop to wait for completion or timeout
+    QEventLoop loop;
+    connect(&watcher, &QFutureWatcher<int>::finished, &loop, &QEventLoop::quit);
+    connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    
+    timeoutTimer.start();
+    loop.exec();
+    
+    if (timeoutTimer.isActive()) {
+        // Operation completed before timeout
+        timeoutTimer.stop();
+        return future.result();
+    } else {
+        // Timeout occurred - we can't actually cancel the git operation,
+        // but we can return a timeout error code
+        // Note: The git operation will continue running in the background thread
+        // but will be serialized by the mutex, so it won't interfere with other operations
+        return GIT_ETIMEOUT;
+    }
 }
 
 RemoteSelectionDialog::RemoteSelectionDialog(const QList<GitRemote>& remotes, QWidget *parent)
