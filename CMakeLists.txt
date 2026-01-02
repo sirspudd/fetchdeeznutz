@@ -17,10 +17,10 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBGIT2 REQUIRED libgit2)
 
 set(PROJECT_SOURCES
-        main.cpp
-        fetchdeeznutzwindow.cpp
-        fetchdeeznutzwindow.h
-        resources.qrc
+        src/main.cpp
+        src/fetchdeeznutzwindow.cpp
+        src/fetchdeeznutzwindow.h
+        resources/resources.qrc
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
@@ -96,62 +96,62 @@ install(TARGETS fetchdeeznuts
 )
 
 # Install desktop file
-install(FILES fetchdeeznuts-install.desktop
+install(FILES resources/fetchdeeznuts-install.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
     RENAME fetchdeeznuts.desktop
 )
 
 # Install icons
-install(FILES nuts_icon.svg
+install(FILES resources/nuts_icon.svg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
     RENAME fetchdeeznuts.svg
 )
 
 # Install PNG icons if they exist
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-16.png)
-    install(FILES fetchdeeznuts-16.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-16.png)
+    install(FILES resources/fetchdeeznuts-16.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps
         RENAME fetchdeeznuts.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-24.png)
-    install(FILES fetchdeeznuts-24.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-24.png)
+    install(FILES resources/fetchdeeznuts-24.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/24x24/apps
         RENAME fetchdeeznuts.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-32.png)
-    install(FILES fetchdeeznuts-32.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-32.png)
+    install(FILES resources/fetchdeeznuts-32.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps
         RENAME fetchdeeznuts.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-48.png)
-    install(FILES fetchdeeznuts-48.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-48.png)
+    install(FILES resources/fetchdeeznuts-48.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48/apps
         RENAME fetchdeeznuts.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-64.png)
-    install(FILES fetchdeeznuts-64.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-64.png)
+    install(FILES resources/fetchdeeznuts-64.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps
         RENAME fetchdeeznuts.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-128.png)
-    install(FILES fetchdeeznuts-128.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-128.png)
+    install(FILES resources/fetchdeeznuts-128.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps
         RENAME fetchdeeznuts.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fetchdeeznuts-256.png)
-    install(FILES fetchdeeznuts-256.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-256.png)
+    install(FILES resources/fetchdeeznuts-256.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
         RENAME fetchdeeznuts.png
     )
