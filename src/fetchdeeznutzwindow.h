@@ -347,4 +347,8 @@ private:
     bool isFetching;
 };
 
+// Register types with Qt's meta-object system for use with Q_ARG
+Q_DECLARE_METATYPE(GitRemote)
+Q_DECLARE_METATYPE(GitRepository)
+
 #endif // DEEZNUTZWINDOW_H

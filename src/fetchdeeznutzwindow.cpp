@@ -625,6 +625,10 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     setWindowTitle("Git Repository Fetcher");
     setMinimumSize(800, 600);
 
+    // Register types with Qt's meta-object system
+    qRegisterMetaType<GitRemote>("GitRemote");
+    qRegisterMetaType<GitRepository>("GitRepository");
+    
     // Setup background thread and worker
     fetchWorker->moveToThread(fetchThread);
     connect(fetchThread, &QThread::finished, fetchWorker, &GitFetchWorker::deleteLater);
