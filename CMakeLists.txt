@@ -18,6 +18,16 @@ pkg_check_modules(LIBGIT2 REQUIRED libgit2)
 
 set(PROJECT_SOURCES
         src/main.cpp
+        src/gitmodels.cpp
+        src/gitmodels.h
+        src/gitutils.cpp
+        src/gitutils.h
+        src/gitfetchworker.cpp
+        src/gitfetchworker.h
+        src/remoteselectiondialog.cpp
+        src/remoteselectiondialog.h
+        src/repositorydialog.cpp
+        src/repositorydialog.h
         src/fetchdeeznutzwindow.cpp
         src/fetchdeeznutzwindow.h
         resources/resources.qrc
