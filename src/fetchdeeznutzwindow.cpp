@@ -625,9 +625,17 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     setWindowTitle("Git Repository Fetcher");
     setMinimumSize(800, 600);
 
-    // Register types with Qt's meta-object system
+    // Register types with Qt's meta-object system (must be done before moving to thread)
     qRegisterMetaType<GitRemote>("GitRemote");
     qRegisterMetaType<GitRepository>("GitRepository");
+    
+    // Verify registration
+    if (QMetaType::type("GitRepository") == QMetaType::UnknownType) {
+        qWarning() << "Failed to register GitRepository meta type";
+    }
+    if (QMetaType::type("GitRemote") == QMetaType::UnknownType) {
+        qWarning() << "Failed to register GitRemote meta type";
+    }
     
     // Setup background thread and worker
     fetchWorker->moveToThread(fetchThread);
@@ -638,6 +646,11 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
     connect(fetchWorker, &GitFetchWorker::commitCountsUpdated, this, &FetchDeeznutzWindow::onCommitCountsUpdated);
     fetchThread->start();
+    
+    // Wait for thread to be ready
+    while (!fetchThread->isRunning()) {
+        QThread::msleep(10);
+    }
     
     // Set initial timeout values
     QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, 300)); // 5 minutes default
@@ -992,21 +1005,41 @@ void FetchDeeznutzWindow::showContextMenu(const QPoint& pos)
 
 void FetchDeeznutzWindow::fetchSelected()
 {
+    if (!fetchWorker) {
+        logMessage("Error: Fetch worker is not initialized");
+        return;
+    }
+    
     QTreeWidgetItem* currentItem = repositoryTree->currentItem();
     GitRepository* repo = getRepositoryFromTreeItem(currentItem);
     if (repo) {
+        // Make a copy to ensure thread safety
+        GitRepository repoCopy = *repo;
         // Use background worker for fetching
-        QMetaObject::invokeMethod(fetchWorker, "fetchRepository", Qt::QueuedConnection, Q_ARG(GitRepository, *repo));
+        QMetaObject::invokeMethod(fetchWorker, "fetchRepository", Qt::QueuedConnection, Q_ARG(GitRepository, repoCopy));
     }
 }
 
 void FetchDeeznutzWindow::fetchAll()
 {
+    if (!fetchWorker) {
+        logMessage("Error: Fetch worker is not initialized");
+        return;
+    }
+    
+    if (!fetchThread || !fetchThread->isRunning()) {
+        logMessage("Error: Fetch worker thread is not running");
+        return;
+    }
+    
     logMessage("Starting fetch for all enabled repositories...");
-    for (GitRepository& repo : repositories) {
+    for (const GitRepository& repo : repositories) {
         if (repo.enabled) {
-            // Use background worker for fetching
-            QMetaObject::invokeMethod(fetchWorker, "fetchRepository", Qt::QueuedConnection, Q_ARG(GitRepository, repo));
+            // Make an explicit copy to ensure thread safety
+            GitRepository repoCopy = repo;
+            // Use QMetaObject::invokeMethod with queued connection
+            // This ensures the call happens in the worker thread
+            QMetaObject::invokeMethod(fetchWorker, "fetchRepository", Qt::QueuedConnection, Q_ARG(GitRepository, repoCopy));
         }
     }
 }
