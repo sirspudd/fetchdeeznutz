@@ -27,7 +27,8 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
     emit fetchStarted(repo.name);
     
     // Run fetch in parallel using QtConcurrent, but all git operations will be serialized by g_gitMutex
-    QtConcurrent::run([this, repo]() {
+    // Store the future to avoid the nodiscard warning, but we don't actively track it
+    [[maybe_unused]] QFuture<void> future = QtConcurrent::run([this, repo]() {
         performFetch(repo);
     });
 }
