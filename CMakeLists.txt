@@ -103,11 +103,12 @@ include(GNUInstallDirs)
 #    message(STATUS "ImageMagick not found - PNG icons will not be generated")
 #endif()
 
-# Install the executable
+# Install the executable (strip symbols by default)
 install(TARGETS fetchdeeznuts
     BUNDLE DESTINATION .
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    STRIP
 )
 
 # Install desktop file
