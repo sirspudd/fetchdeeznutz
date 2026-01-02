@@ -55,6 +55,7 @@ private slots:
     void fetchSelected();
     void fetchAll();
     void onRepositorySelectionChanged();
+    void onRepositoryItemDoubleClicked(QTreeWidgetItem* item, int column);
     void onFetchIntervalChanged();
     void onFetchTimeoutChanged();
     void onConnectionTimeoutChanged();

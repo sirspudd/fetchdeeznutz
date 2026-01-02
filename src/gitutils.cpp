@@ -423,4 +423,173 @@ int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetc
     return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
 }
 
+bool canFastForward(const QString& repoPath, const QString& branch, const QString& remoteName) {
+    QMutexLocker locker(&g_gitMutex);
+    
+    git_repository *repository = nullptr;
+    int error = git_repository_open(&repository, repoPath.toLocal8Bit().constData());
+    if (error < 0) {
+        return false;
+    }
+    
+    // Get local branch
+    QString localBranchRef = QString("refs/heads/%1").arg(branch);
+    git_reference *localBranch = nullptr;
+    error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
+    if (error < 0) {
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Get remote branch
+    QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remoteName, branch);
+    git_reference *remoteBranch = nullptr;
+    error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+    if (error < 0) {
+        git_reference_free(localBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Get commits
+    git_commit *localCommit = nullptr;
+    git_commit *remoteCommit = nullptr;
+    error = git_commit_lookup(&localCommit, repository, git_reference_target(localBranch));
+    if (error < 0) {
+        git_reference_free(localBranch);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
+    if (error < 0) {
+        git_commit_free(localCommit);
+        git_reference_free(localBranch);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Check if local is ancestor of remote (can fast-forward)
+    // This means the merge base of local and remote should be the local commit
+    git_oid mergeBase;
+    error = git_merge_base(&mergeBase, repository, git_commit_id(localCommit), git_commit_id(remoteCommit));
+    bool canFF = (error == 0) && git_oid_equal(git_commit_id(localCommit), &mergeBase);
+    
+    git_commit_free(localCommit);
+    git_commit_free(remoteCommit);
+    git_reference_free(localBranch);
+    git_reference_free(remoteBranch);
+    git_repository_free(repository);
+    
+    return canFF;
+}
+
+bool rebaseBranch(const QString& repoPath, const QString& branch, const QString& remoteName, QString& errorMessage) {
+    QMutexLocker locker(&g_gitMutex);
+    
+    git_repository *repository = nullptr;
+    int error = git_repository_open(&repository, repoPath.toLocal8Bit().constData());
+    if (error < 0) {
+        errorMessage = getGitErrorMessage(error);
+        return false;
+    }
+    
+    // Get remote branch reference
+    QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remoteName, branch);
+    git_reference *remoteBranch = nullptr;
+    error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+    if (error < 0) {
+        errorMessage = QString("Remote branch %1/%2 not found").arg(remoteName, branch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Get the remote commit
+    git_commit *remoteCommit = nullptr;
+    error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
+    if (error < 0) {
+        errorMessage = getGitErrorMessage(error);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Get the local branch reference
+    QString localBranchRef = QString("refs/heads/%1").arg(branch);
+    git_reference *localBranch = nullptr;
+    error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
+    if (error < 0) {
+        errorMessage = QString("Local branch %1 not found").arg(branch);
+        git_commit_free(remoteCommit);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Perform the rebase by resetting to the remote branch (fast-forward)
+    // Since we've verified it can be fast-forwarded, we can safely reset
+    git_object *targetObj = nullptr;
+    error = git_reference_peel(&targetObj, remoteBranch, GIT_OBJECT_COMMIT);
+    if (error < 0) {
+        errorMessage = getGitErrorMessage(error);
+        git_reference_free(localBranch);
+        git_commit_free(remoteCommit);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Update the local branch to point to the remote commit
+    git_reference *updatedRef = nullptr;
+    error = git_reference_set_target(&updatedRef, localBranch, git_object_id(targetObj), "Rebase: fast-forward");
+    if (error < 0) {
+        errorMessage = getGitErrorMessage(error);
+        git_object_free(targetObj);
+        git_reference_free(localBranch);
+        git_commit_free(remoteCommit);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Checkout the updated branch
+    git_checkout_options checkoutOpts = GIT_CHECKOUT_OPTIONS_INIT;
+    checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE;
+    error = git_checkout_tree(repository, targetObj, &checkoutOpts);
+    if (error < 0) {
+        errorMessage = getGitErrorMessage(error);
+        git_reference_free(updatedRef);
+        git_object_free(targetObj);
+        git_reference_free(localBranch);
+        git_commit_free(remoteCommit);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    // Update HEAD to point to the branch
+    error = git_repository_set_head(repository, localBranchRef.toLocal8Bit().constData());
+    if (error < 0) {
+        errorMessage = getGitErrorMessage(error);
+        git_reference_free(updatedRef);
+        git_object_free(targetObj);
+        git_reference_free(localBranch);
+        git_commit_free(remoteCommit);
+        git_reference_free(remoteBranch);
+        git_repository_free(repository);
+        return false;
+    }
+    
+    git_reference_free(updatedRef);
+    git_object_free(targetObj);
+    git_reference_free(localBranch);
+    git_commit_free(remoteCommit);
+    git_reference_free(remoteBranch);
+    git_repository_free(repository);
+    
+    return true;
+}
+
 } // namespace GitUtils

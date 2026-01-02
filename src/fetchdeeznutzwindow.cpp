@@ -105,6 +105,7 @@ void FetchDeeznutzWindow::setupUI()
     repositoryTree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(repositoryTree, &QTreeWidget::itemSelectionChanged, this, &FetchDeeznutzWindow::onRepositorySelectionChanged);
     connect(repositoryTree, &QTreeWidget::customContextMenuRequested, this, &FetchDeeznutzWindow::showContextMenu);
+    connect(repositoryTree, &QTreeWidget::itemDoubleClicked, this, &FetchDeeznutzWindow::onRepositoryItemDoubleClicked);
     repoLayout->addWidget(repositoryTree);
 
     // Setup context menu
@@ -448,6 +449,55 @@ void FetchDeeznutzWindow::onRepositorySelectionChanged()
     editButton->setEnabled(hasSelection);
     removeButton->setEnabled(hasSelection);
     fetchSelectedButton->setEnabled(hasSelection);
+}
+
+void FetchDeeznutzWindow::onRepositoryItemDoubleClicked(QTreeWidgetItem* item, int column)
+{
+    Q_UNUSED(column);
+    
+    if (!item) return;
+    
+    // Get the repository from the item
+    GitRepository* repo = getRepositoryFromTreeItem(item);
+    if (!repo) return;
+    
+    // Only handle repository items (not path items or remote items)
+    // A repository item is one that has a parent (path item) but is not a remote item
+    QTreeWidgetItem* parent = item->parent();
+    if (!parent) return; // Top-level path item
+    
+    // Check if this is a remote item (has a repository as parent)
+    QTreeWidgetItem* grandparent = parent->parent();
+    if (grandparent) return; // This is a remote item, not a repository item
+    
+    // Find the tracking remote (the one with commitsBehind > 0 and can be fast-forwarded)
+    GitRemote* trackingRemote = nullptr;
+    for (GitRemote& remote : repo->remotes) {
+        if (remote.commitsBehind > 0 && remote.commitsAhead == 0) {
+            // Check if it can be fast-forwarded
+            if (GitUtils::canFastForward(repo->localPath, repo->branch, remote.name)) {
+                trackingRemote = &remote;
+                break;
+            }
+        }
+    }
+    
+    if (!trackingRemote) {
+        logMessage(QString("Repository %1: No fast-forwardable remote branch found").arg(repo->name));
+        return;
+    }
+    
+    // Perform the rebase
+    logMessage(QString("Rebasing %1/%2 against %3...").arg(repo->name, repo->branch, trackingRemote->name));
+    QString errorMessage;
+    if (GitUtils::rebaseBranch(repo->localPath, repo->branch, trackingRemote->name, errorMessage)) {
+        logMessage(QString("✓ Successfully rebased %1/%2 against %3").arg(repo->name, repo->branch, trackingRemote->name));
+        // Recalculate commit counts after rebase
+        calculateCommitCounts(*repo);
+        updateRepositoryTree();
+    } else {
+        logMessage(QString("✗ Failed to rebase %1/%2: %3").arg(repo->name, repo->branch, errorMessage));
+    }
 }
 
 void FetchDeeznutzWindow::onFetchIntervalChanged()

@@ -79,6 +79,16 @@ QString getGitErrorMessage(int error);
  */
 int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds);
 
+/**
+ * Check if a branch can be fast-forwarded (local is ancestor of remote)
+ */
+bool canFastForward(const QString& repoPath, const QString& branch, const QString& remoteName);
+
+/**
+ * Rebase the current branch against its upstream remote branch
+ */
+bool rebaseBranch(const QString& repoPath, const QString& branch, const QString& remoteName, QString& errorMessage);
+
 } // namespace GitUtils
 
 #endif // GITUTILS_H
