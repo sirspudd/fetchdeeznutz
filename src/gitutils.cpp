@@ -287,34 +287,65 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
         }
     }
 
-    // Get the remote branch reference - try multiple approaches
+    // Try to get the upstream tracking branch first (this is the most accurate)
     git_reference *remoteBranch = nullptr;
-    QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, branch);
-    error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
-
-    if (error < 0) {
-        qDebug() << "Remote branch" << remoteBranchRef << "not found, trying alternatives";
+    git_reference *upstream = nullptr;
+    
+    // Check if this is a branch reference (not just any reference)
+    if (git_reference_is_branch(localBranch)) {
+        error = git_branch_upstream(&upstream, localBranch);
         
-        // Try the remote's default branch (usually main or master)
-        QStringList defaultBranches = {"main", "master", "develop"};
-        for (const QString& defaultBranch : defaultBranches) {
-            remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, defaultBranch);
-            error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
-            if (error >= 0) {
-                qDebug() << "Found remote branch" << remoteBranchRef;
-                break;
+        if (error == 0 && upstream) {
+            // Get the upstream reference name and check if it belongs to the remote we're checking
+            const char *upstreamRefName = git_reference_name(upstream);
+            if (upstreamRefName) {
+                QString upstreamRefStr = QString::fromUtf8(upstreamRefName);
+                // Upstream ref format is "refs/remotes/remote/branch" (e.g., "refs/remotes/origin/master")
+                QString expectedPrefix = QString("refs/remotes/%1/").arg(remote.name);
+                if (upstreamRefStr.startsWith(expectedPrefix)) {
+                    remoteBranch = upstream;
+                    upstream = nullptr; // Don't free it, we're using it
+                    qDebug() << "Found upstream tracking branch:" << upstreamRefStr;
+                } else {
+                    git_reference_free(upstream);
+                    upstream = nullptr;
+                }
+            } else {
+                git_reference_free(upstream);
+                upstream = nullptr;
             }
         }
-        
+    }
+    
+    // If no upstream tracking branch, try to find the remote branch manually
+    if (!remoteBranch) {
+        QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, branch);
+        error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+
         if (error < 0) {
-            qDebug() << "No remote branch found, setting counts to 0";
-            git_reference_free(localBranch);
-            remote.commitsAhead = 0;
-            remote.commitsBehind = 0;
-            return;
+            qDebug() << "Remote branch" << remoteBranchRef << "not found, trying alternatives";
+            
+            // Try the remote's default branch (usually main or master)
+            QStringList defaultBranches = {"main", "master", "develop"};
+            for (const QString& defaultBranch : defaultBranches) {
+                remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, defaultBranch);
+                error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
+                if (error >= 0) {
+                    qDebug() << "Found remote branch" << remoteBranchRef;
+                    break;
+                }
+            }
+            
+            if (error < 0) {
+                qDebug() << "No remote branch found, setting counts to 0";
+                git_reference_free(localBranch);
+                remote.commitsAhead = 0;
+                remote.commitsBehind = 0;
+                return;
+            }
+        } else {
+            qDebug() << "Found remote branch" << remoteBranchRef;
         }
-    } else {
-        qDebug() << "Found remote branch" << remoteBranchRef;
     }
 
     // Get the commits
