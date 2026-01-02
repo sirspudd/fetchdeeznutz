@@ -113,20 +113,29 @@ install(TARGETS fetchdeeznuts
 # Strip installed executable and libraries
 install(CODE "
     if(CMAKE_STRIP)
-        file(GLOB_RECURSE INSTALLED_BINARIES
-            \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/*\"
-            \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/*\"
-        )
-        foreach(BINARY \${INSTALLED_BINARIES})
-            if(EXISTS \${BINARY})
+        set(BINARY_PATH \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/fetchdeeznuts\")
+        if(EXISTS \"\${BINARY_PATH}\")
+            message(STATUS \"Stripping \${BINARY_PATH}\")
+            execute_process(
+                COMMAND \"${CMAKE_STRIP}\" \"\${BINARY_PATH}\"
+                RESULT_VARIABLE STRIP_RESULT
+            )
+            if(STRIP_RESULT)
+                message(WARNING \"Failed to strip \${BINARY_PATH}\")
+            endif()
+        endif()
+        file(GLOB INSTALLED_LIBS \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/*.so*\")
+        foreach(LIB \${INSTALLED_LIBS})
+            if(EXISTS \"\${LIB}\")
+                message(STATUS \"Stripping \${LIB}\")
                 execute_process(
-                    COMMAND \"${CMAKE_STRIP}\" \"\${BINARY}\"
+                    COMMAND \"${CMAKE_STRIP}\" \"\${LIB}\"
                     RESULT_VARIABLE STRIP_RESULT
-                    OUTPUT_QUIET
-                    ERROR_QUIET
                 )
             endif()
         endforeach()
+    else()
+        message(WARNING \"CMAKE_STRIP not found - binaries will not be stripped\")
     endif()
 ")
 
