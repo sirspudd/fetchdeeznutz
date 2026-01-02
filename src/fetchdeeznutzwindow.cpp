@@ -27,11 +27,11 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     qRegisterMetaType<GitRemote>("GitRemote");
     qRegisterMetaType<GitRepository>("GitRepository");
     
-    // Verify registration
-    if (QMetaType::type("GitRepository") == QMetaType::UnknownType) {
+    // Verify registration (using QMetaType::fromType for Qt6 compatibility)
+    if (!QMetaType::fromType<GitRepository>().isValid()) {
         qWarning() << "Failed to register GitRepository meta type";
     }
-    if (QMetaType::type("GitRemote") == QMetaType::UnknownType) {
+    if (!QMetaType::fromType<GitRemote>().isValid()) {
         qWarning() << "Failed to register GitRemote meta type";
     }
     
@@ -1139,5 +1139,3 @@ bool FetchDeeznutzWindow::isRepositoryValid(const QString& path)
 {
     return GitUtils::isRepositoryValid(path);
 }
-
-#include "fetchdeeznutzwindow.moc"

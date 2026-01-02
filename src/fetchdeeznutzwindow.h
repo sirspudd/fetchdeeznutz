@@ -33,6 +33,7 @@
 #include <QJsonArray>
 #include <QFileInfo>
 #include <QDateTime>
+#include <QFormLayout>
 
 // Forward declarations
 struct git_repository;
@@ -106,6 +107,7 @@ private:
     QString getRepositoryName(const QString& path);
     QList<GitRemote> getRepositoryRemotes(const QString& path);
     QString getRepositoryBranch(const QString& path);
+    bool isRepositoryValid(const QString& path);
 
     // UI components
     QTreeWidget *repositoryTree;

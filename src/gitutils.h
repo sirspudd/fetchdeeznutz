@@ -5,11 +5,7 @@
 #include <QString>
 #include <QStringList>
 #include <QMutex>
-
-// Forward declaration
-struct git_repository;
-struct git_remote;
-struct git_fetch_options;
+#include <git2.h>
 
 /**
  * Global mutex to serialize all libgit2 operations (libgit2 is not thread-safe)

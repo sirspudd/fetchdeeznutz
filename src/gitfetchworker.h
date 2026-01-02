@@ -4,6 +4,7 @@
 #include "gitmodels.h"
 #include <QObject>
 #include <QTimer>
+#include <git2.h>
 
 class GitFetchWorker : public QObject
 {

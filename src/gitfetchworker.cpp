@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QTimer>
 #include <QtConcurrent>
+#include <QFuture>
 #include <QMutexLocker>
 #include <QDebug>
 
