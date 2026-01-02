@@ -10,6 +10,7 @@
 #include <QMap>
 #include <QMetaType>
 #include <QMutexLocker>
+#include <QtConcurrent>
 #include <git2.h>
 
 FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
@@ -47,11 +48,6 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
     connect(fetchWorker, &GitFetchWorker::commitCountsUpdated, this, &FetchDeeznutzWindow::onCommitCountsUpdated);
     fetchThread->start();
-    
-    // Wait for thread to be ready
-    while (!fetchThread->isRunning()) {
-        QThread::msleep(10);
-    }
     
     // Set initial timeout values
     QMetaObject::invokeMethod(fetchWorker, "setTimeout", Qt::QueuedConnection, Q_ARG(int, 300)); // 5 minutes default
@@ -836,14 +832,8 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
         return;
     }
 
-    logMessage(QString("DEBUG: Repository %1 has %2 remotes, branch: %3").arg(repo.name).arg(repo.remotes.size()).arg(repo.branch));
     for (GitRemote& remote : repo.remotes) {
-        logMessage(QString("DEBUG: Calculating for remote %1/%2").arg(repo.name, remote.name));
         GitUtils::calculateRemoteCommitCounts(repository, remote, repo.branch, repo.name);
-        logMessage(QString("Commit counts for %1/%2: +%3/-%4")
-                   .arg(repo.name, remote.name)
-                   .arg(remote.commitsAhead)
-                   .arg(remote.commitsBehind));
     }
 
     {
@@ -851,6 +841,57 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
         git_repository_free(repository);
     }
     updateRepositoryTree();
+}
+
+void FetchDeeznutzWindow::calculateCommitCountsAsync(GitRepository& repo)
+{
+    // Store repo name and path for lookup in background thread (capture by value)
+    QString repoName = repo.name;
+    QString repoPath = repo.localPath;
+    
+    // Run commit count calculation in background thread
+    QtConcurrent::run([this, repoName, repoPath]() {
+        // Find the repository in our list (by name and path)
+        GitRepository* repoPtr = nullptr;
+        for (GitRepository& r : repositories) {
+            if (r.name == repoName && r.localPath == repoPath) {
+                repoPtr = &r;
+                break;
+            }
+        }
+        
+        if (!repoPtr) {
+            return; // Repository was removed
+        }
+        
+        if (!GitUtils::isRepositoryValid(repoPtr->localPath)) {
+            return;
+        }
+
+        git_repository *repository = nullptr;
+        int error;
+        {
+            QMutexLocker locker(&g_gitMutex);
+            error = git_repository_open(&repository, repoPtr->localPath.toLocal8Bit().constData());
+        }
+        if (error < 0) {
+            return;
+        }
+
+        for (GitRemote& remote : repoPtr->remotes) {
+            GitUtils::calculateRemoteCommitCounts(repository, remote, repoPtr->branch, repoPtr->name);
+        }
+
+        {
+            QMutexLocker locker(&g_gitMutex);
+            git_repository_free(repository);
+        }
+        
+        // Update UI on main thread using QTimer::singleShot
+        QTimer::singleShot(0, this, [this]() {
+            updateRepositoryTree();
+        });
+    });
 }
 
 void FetchDeeznutzWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName)
@@ -921,9 +962,9 @@ void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryP
     }
 
     if (addedCount > 0) {
-        // Calculate commit counts for newly added repositories
+        // Calculate commit counts for newly added repositories asynchronously
         for (int i = repositories.size() - addedCount; i < repositories.size(); ++i) {
-            calculateCommitCounts(repositories[i]);
+            calculateCommitCountsAsync(repositories[i]);
         }
         updateRepositoryTree();
         saveRepositories();
@@ -1050,9 +1091,9 @@ void FetchDeeznutzWindow::loadRepositories()
 
     logMessage(QString("Loaded %1 repositories from configuration").arg(repositories.size()));
 
-    // Calculate commit counts for loaded repositories
+    // Calculate commit counts for loaded repositories asynchronously
     for (GitRepository& repo : repositories) {
-        calculateCommitCounts(repo);
+        calculateCommitCountsAsync(repo);
     }
 }
 

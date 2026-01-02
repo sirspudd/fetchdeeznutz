@@ -88,6 +88,7 @@ private:
     void logMessage(const QString& message);
     QString getConfigFilePath() const;
     void calculateCommitCounts(GitRepository& repo);
+    void calculateCommitCountsAsync(GitRepository& repo);
     void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName);
     void scanDirectoryForRepositories(const QString& directoryPath);
     QTreeWidgetItem* createPathTreeItem(const QString& path);

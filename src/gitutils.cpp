@@ -389,27 +389,24 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
 
     // Count commits ahead (in local but not in remote)
     git_revwalk_reset(walk);
-    git_revwalk_push(walk, localOid);
-    git_revwalk_hide(walk, remoteOid);
+    git_revwalk_push(walk, git_commit_id(localCommit));
+    git_revwalk_hide(walk, git_commit_id(remoteCommit));
 
     int ahead = 0;
     git_oid oid;
     while (git_revwalk_next(&oid, walk) == 0) {
         ahead++;
     }
-    qWarning() << "Commits ahead (local not in remote):" << ahead;
 
     // Count commits behind (in remote but not in local)
     git_revwalk_reset(walk);
-    git_revwalk_push(walk, remoteOid);
-    git_revwalk_hide(walk, localOid);
+    git_revwalk_push(walk, git_commit_id(remoteCommit));
+    git_revwalk_hide(walk, git_commit_id(localCommit));
 
     int behind = 0;
     while (git_revwalk_next(&oid, walk) == 0) {
         behind++;
     }
-    qWarning() << "Commits behind (remote not in local):" << behind;
-
 
     remote.commitsAhead = ahead;
     remote.commitsBehind = behind;
