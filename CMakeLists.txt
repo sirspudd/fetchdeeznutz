@@ -103,13 +103,32 @@ include(GNUInstallDirs)
 #    message(STATUS "ImageMagick not found - PNG icons will not be generated")
 #endif()
 
-# Install the executable (strip symbols by default)
+# Install the executable
 install(TARGETS fetchdeeznuts
     BUNDLE DESTINATION .
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    STRIP
 )
+
+# Strip installed executable and libraries
+install(CODE "
+    if(CMAKE_STRIP)
+        file(GLOB_RECURSE INSTALLED_BINARIES
+            \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/*\"
+            \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/*\"
+        )
+        foreach(BINARY \${INSTALLED_BINARIES})
+            if(EXISTS \${BINARY})
+                execute_process(
+                    COMMAND \"${CMAKE_STRIP}\" \"\${BINARY}\"
+                    RESULT_VARIABLE STRIP_RESULT
+                    OUTPUT_QUIET
+                    ERROR_QUIET
+                )
+            endif()
+        endforeach()
+    endif()
+")
 
 # Install desktop file
 install(FILES resources/fetchdeeznuts-install.desktop
