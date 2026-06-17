@@ -38,6 +38,7 @@
 #include <QDateTime>
 #include <QFormLayout>
 #include <QSettings>
+#include <QByteArray>
 
 // Forward declarations
 struct git_repository;
@@ -105,6 +106,11 @@ private:
     void loadSettings();
     void saveSettings();
     void updateAutoFetchControls();
+    // Capture/re-apply the window geometry around hide/show. Needed because some
+    // platforms (notably Wayland) drop a top-level window's size when it is
+    // hidden and shown again, reverting it to the layout size hint.
+    void stashGeometry();
+    void applyGeometry();
     
     // Override close event to hide to tray
     void closeEvent(QCloseEvent *event) override;
@@ -149,6 +155,7 @@ private:
     QList<GitRepository> repositories;
     QTimer *fetchTimer;
     QTimer *fetchTicker; // 1s heartbeat to animate elapsed time on active fetches
+    QByteArray m_geometry; // last known window geometry, persisted across sessions
 };
 
 #endif // FETCHDEEZNUTZWINDOW_H

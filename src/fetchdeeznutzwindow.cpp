@@ -722,17 +722,31 @@ void FetchDeeznutzWindow::onCommitCountsUpdated(const QString& repoName, const Q
     }
 }
 
+void FetchDeeznutzWindow::stashGeometry()
+{
+    // Only meaningful while mapped; saveGeometry() on a hidden window can return
+    // a stale/empty size on some platforms.
+    if (isVisible()) {
+        m_geometry = saveGeometry();
+    }
+}
+
+void FetchDeeznutzWindow::applyGeometry()
+{
+    if (!m_geometry.isEmpty()) {
+        restoreGeometry(m_geometry);
+    }
+}
+
 void FetchDeeznutzWindow::onTrayIconActivated(QSystemTrayIcon::ActivationReason reason)
 {
     // Handle both single click (Trigger) and double click
     if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
         if (isVisible() && !isMinimized()) {
+            stashGeometry();
             hide();
         } else {
-            setWindowState(Qt::WindowNoState);
-            show();
-            raise();
-            activateWindow();
+            showWindow();
         }
     }
 }
@@ -741,12 +755,16 @@ void FetchDeeznutzWindow::showWindow()
 {
     setWindowState(Qt::WindowNoState);
     show();
+    // Re-apply after show(): some platforms (Wayland) only honor the size once
+    // the window is mapped, and otherwise revert it to the layout size hint.
+    applyGeometry();
     raise();
     activateWindow();
 }
 
 void FetchDeeznutzWindow::hideWindow()
 {
+    stashGeometry();
     hide();
 }
 
@@ -757,7 +775,8 @@ void FetchDeeznutzWindow::quitApplication()
 
 void FetchDeeznutzWindow::closeEvent(QCloseEvent *event)
 {
-    // Persist the current window geometry before hiding to the tray.
+    // Capture and persist the current window geometry before hiding to the tray.
+    stashGeometry();
     saveSettings();
     // Hide to system tray instead of closing
     hide();
@@ -1005,11 +1024,10 @@ void FetchDeeznutzWindow::loadSettings()
     // Load start-minimized preference (default: false -> show the window on launch)
     startMinimizedCheckBox->setChecked(settings.value("startMinimized", false).toBool());
 
-    // Restore the saved window geometry (size/position) if present.
-    const QByteArray geometry = settings.value("windowGeometry").toByteArray();
-    if (!geometry.isEmpty()) {
-        restoreGeometry(geometry);
-    }
+    // Load the saved window geometry; it is applied on each show() (see
+    // applyGeometry) rather than only once here.
+    m_geometry = settings.value("windowGeometry").toByteArray();
+    applyGeometry();
 
     // Update enabled state of interval controls based on auto-fetch setting
     updateAutoFetchControls();
@@ -1024,7 +1042,14 @@ void FetchDeeznutzWindow::saveSettings()
     settings.setValue("connectionTimeout", connectionTimeoutSpinBox->value());
     settings.setValue("autoFetchEnabled", autoFetchCheckBox->isChecked());
     settings.setValue("startMinimized", startMinimizedCheckBox->isChecked());
-    settings.setValue("windowGeometry", saveGeometry());
+    // Prefer the live geometry when the window is mapped; otherwise persist the
+    // last stashed value.
+    if (isVisible()) {
+        m_geometry = saveGeometry();
+    }
+    if (!m_geometry.isEmpty()) {
+        settings.setValue("windowGeometry", m_geometry);
+    }
     
     settings.sync();
 }
