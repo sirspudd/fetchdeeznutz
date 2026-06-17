@@ -12,6 +12,7 @@
 
 #include <QMainWindow>
 #include <QTreeView>
+#include <QSplitter>
 #include <QModelIndex>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -116,6 +117,8 @@ private:
     void closeEvent(QCloseEvent *event) override;
 
     // UI components
+    QSplitter *mainSplitter;  // horizontal: left panel | activity log
+    QSplitter *leftSplitter;  // vertical: repository tree | settings/status
     QTreeView *repositoryView;
     RepositoryTreeModel *repositoryModel;
     QMenu *contextMenu;

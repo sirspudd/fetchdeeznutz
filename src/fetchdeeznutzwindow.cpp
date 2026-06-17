@@ -169,7 +169,6 @@ void FetchDeeznutzWindow::setupUI()
     repoButtonLayout->addWidget(fetchSelectedButton);
 
     repoLayout->addLayout(repoButtonLayout);
-    leftLayout->addWidget(repoGroup);
 
     // Global controls
     settingsGroup = new QGroupBox("Settings");
@@ -225,6 +224,12 @@ void FetchDeeznutzWindow::setupUI()
 
     leftLayout->addStretch();
 
+    // The settings/status block lives below the repository tree; wrap it so the
+    // vertical splitter can size the tree against it.
+    QWidget *leftBottom = new QWidget();
+    leftBottom->setLayout(leftLayout);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+
     // Right panel - Log
     QGroupBox *logGroup = new QGroupBox("Activity Log");
     QVBoxLayout *logLayout = new QVBoxLayout(logGroup);
@@ -234,8 +239,24 @@ void FetchDeeznutzWindow::setupUI()
     logTextEdit->document()->setMaximumBlockCount(1000); // Limit log size
     logLayout->addWidget(logTextEdit);
 
-    mainLayout->addLayout(leftLayout, 1);
-    mainLayout->addWidget(logGroup, 1);
+    // Vertical splitter: repository tree (top) vs. settings/status (bottom).
+    leftSplitter = new QSplitter(Qt::Vertical);
+    leftSplitter->addWidget(repoGroup);
+    leftSplitter->addWidget(leftBottom);
+    leftSplitter->setStretchFactor(0, 1); // tree takes the slack
+    leftSplitter->setStretchFactor(1, 0);
+    leftSplitter->setChildrenCollapsible(false);
+
+    // Horizontal splitter: left panel vs. activity log. Bias toward the left so
+    // the log doesn't claim half the window by default.
+    mainSplitter = new QSplitter(Qt::Horizontal);
+    mainSplitter->addWidget(leftSplitter);
+    mainSplitter->addWidget(logGroup);
+    mainSplitter->setStretchFactor(0, 2);
+    mainSplitter->setStretchFactor(1, 1);
+    mainSplitter->setChildrenCollapsible(false);
+
+    mainLayout->addWidget(mainSplitter);
 
     // Update button states
     onRepositorySelectionChanged();
@@ -1029,6 +1050,16 @@ void FetchDeeznutzWindow::loadSettings()
     m_geometry = settings.value("windowGeometry").toByteArray();
     applyGeometry();
 
+    // Restore saved pane sizes.
+    const QByteArray mainState = settings.value("mainSplitterState").toByteArray();
+    if (!mainState.isEmpty()) {
+        mainSplitter->restoreState(mainState);
+    }
+    const QByteArray leftState = settings.value("leftSplitterState").toByteArray();
+    if (!leftState.isEmpty()) {
+        leftSplitter->restoreState(leftState);
+    }
+
     // Update enabled state of interval controls based on auto-fetch setting
     updateAutoFetchControls();
 }
@@ -1050,6 +1081,8 @@ void FetchDeeznutzWindow::saveSettings()
     if (!m_geometry.isEmpty()) {
         settings.setValue("windowGeometry", m_geometry);
     }
+    settings.setValue("mainSplitterState", mainSplitter->saveState());
+    settings.setValue("leftSplitterState", leftSplitter->saveState());
     
     settings.sync();
 }
