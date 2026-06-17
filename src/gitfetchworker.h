@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QTimer>
 #include <git2.h>
+#include <atomic>
 
 class GitFetchWorker : public QObject
 {
@@ -31,13 +32,10 @@ private:
     void performFetch(const GitRepository& repo);
     QString getGitErrorMessage(int error) const;
     int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
-    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName);
-    bool isRepositoryValid(const QString& path);
-    int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds);
 
-    bool m_stopRequested;
-    int m_timeoutSeconds;
-    int m_connectionTimeoutSeconds;
+    std::atomic<bool> m_stopRequested;
+    std::atomic<int> m_timeoutSeconds;
+    std::atomic<int> m_connectionTimeoutSeconds;
 };
 
 #endif // GITFETCHWORKER_H

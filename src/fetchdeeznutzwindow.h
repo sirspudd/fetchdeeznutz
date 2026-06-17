@@ -82,15 +82,13 @@ private:
     void setupSystemTray();
     void loadRepositories();
     void saveRepositories();
-    void updateRepositoryList();
     void startScheduledFetch();
     void stopScheduledFetch();
     void fetchRepository(GitRepository& repo);
     void logMessage(const QString& message);
     QString getConfigFilePath() const;
     void calculateCommitCounts(GitRepository& repo);
-    void calculateCommitCountsAsync(GitRepository& repo);
-    void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName);
+    void calculateCommitCountsAsync(const GitRepository& repo);
     void scanDirectoryForRepositories(const QString& directoryPath);
     QTreeWidgetItem* createPathTreeItem(const QString& path);
     QTreeWidgetItem* findOrCreatePathItem(const QString& path);
@@ -103,17 +101,6 @@ private:
     
     // Override close event to hide to tray
     void closeEvent(QCloseEvent *event) override;
-    
-    // Wrapper methods for GitUtils (kept for backward compatibility)
-    QStringList findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs = QStringList());
-    bool isGitRepository(const QString& path);
-    bool isGitWorktree(const QString& path);
-    QString findMainGitRepository(const QString& path);
-    QStringList findWorktreesForRepository(const QString& mainRepoPath);
-    QString getRepositoryName(const QString& path);
-    QList<GitRemote> getRepositoryRemotes(const QString& path);
-    QString getRepositoryBranch(const QString& path);
-    bool isRepositoryValid(const QString& path);
 
     // UI components
     QTreeWidget *repositoryTree;

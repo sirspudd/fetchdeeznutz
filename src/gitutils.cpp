@@ -66,14 +66,25 @@ QString findMainGitRepository(const QString& path) {
             gitFile.close();
             
             if (content.startsWith("gitdir: ")) {
-                QString gitDir = content.mid(8); // Remove "gitdir: " prefix
-                // The gitdir path is relative to the worktree, so we need to resolve it
+                QString gitDir = content.mid(8).trimmed(); // Remove "gitdir: " prefix
+                // The gitdir path may be relative to the worktree; resolve it.
                 QDir worktreeDir(path);
-                QString absoluteGitDir = worktreeDir.absoluteFilePath(gitDir);
-                
-                // The main repository is typically in the parent directory of the worktree's gitdir
-                QDir gitDirObj(absoluteGitDir);
-                return gitDirObj.absolutePath();
+                QString absoluteGitDir = QDir::cleanPath(worktreeDir.absoluteFilePath(gitDir));
+
+                // A worktree's gitdir looks like:
+                //   <mainRepo>/.git/worktrees/<name>
+                // The main repository working tree is the path *before* "/.git/".
+                const QString marker = QStringLiteral("/.git/worktrees/");
+                int idx = absoluteGitDir.indexOf(marker);
+                if (idx > 0) {
+                    return absoluteGitDir.left(idx);
+                }
+
+                // Fallback: strip a trailing "/.git" component if present.
+                int gitIdx = absoluteGitDir.lastIndexOf(QStringLiteral("/.git"));
+                if (gitIdx > 0) {
+                    return absoluteGitDir.left(gitIdx);
+                }
             }
         }
     }
@@ -432,10 +443,13 @@ QString getGitErrorMessage(int error) {
 }
 
 int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds) {
-    // All git operations must be protected by the global mutex for thread safety
-    // The timeoutSeconds parameter is kept for API compatibility but not used
-    // (libgit2 doesn't support cancelling operations mid-flight)
-    QMutexLocker locker(&g_gitMutex);
+    Q_UNUSED(timeoutSeconds); // timeouts are enforced via fetch callbacks + libgit2 server-timeout opts
+    // Deliberately NOT holding g_gitMutex here: the network fetch can block for
+    // a long time, and the supplied git_remote/git_repository handles are owned
+    // exclusively by the calling fetch. Holding the global lock during fetch
+    // would serialize all fetches and let one hung remote freeze every other
+    // git operation in the app. libgit2 is thread-safe across independent
+    // handles when built with GIT_FEATURE_THREADS.
     return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
 }
 

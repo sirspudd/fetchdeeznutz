@@ -3,11 +3,30 @@
 #include <git2.h>
 #include <QDir>
 #include <QFile>
-#include <QTimer>
 #include <QtConcurrent>
 #include <QFuture>
 #include <QMutexLocker>
 #include <QDebug>
+#include <chrono>
+
+namespace {
+// Payload handed to libgit2 fetch callbacks. Lets the callbacks reach the
+// worker (for credentials) and enforce an overall fetch deadline / cancellation.
+struct FetchCallbackPayload {
+    GitFetchWorker* worker;
+    const std::atomic<bool>* stopRequested;
+    std::chrono::steady_clock::time_point deadline;
+
+    bool shouldAbort() const {
+        return stopRequested->load() || std::chrono::steady_clock::now() >= deadline;
+    }
+};
+
+int abortIfNeeded(void* payload) {
+    auto* p = static_cast<FetchCallbackPayload*>(payload);
+    return (p && p->shouldAbort()) ? GIT_EUSER : 0;
+}
+} // namespace
 
 GitFetchWorker::GitFetchWorker(QObject *parent)
     : QObject(parent)
@@ -78,19 +97,22 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
         return;
     }
 
-    // Set up timeout timer
-    QTimer timeoutTimer;
-    timeoutTimer.setSingleShot(true);
-    timeoutTimer.setInterval(m_timeoutSeconds * 1000); // Convert to milliseconds
-    
-    bool timeoutOccurred = false;
-    connect(&timeoutTimer, &QTimer::timeout, [&timeoutOccurred, &repo, this]() {
-        timeoutOccurred = true;
-        m_stopRequested = true;
-        emit fetchError(repo.name, QString("Fetch timed out after %1 seconds").arg(m_timeoutSeconds));
-    });
-    
-    timeoutTimer.start();
+    // Apply the connection / server-side timeouts. These are libgit2 global
+    // options; serialize the write under the git mutex to avoid racing with
+    // other threads reading them mid-connect.
+    const int connectTimeoutMs = m_connectionTimeoutSeconds.load() * 1000;
+    {
+        QMutexLocker locker(&g_gitMutex);
+        git_libgit2_opts(GIT_OPT_SET_SERVER_CONNECT_TIMEOUT, connectTimeoutMs);
+        git_libgit2_opts(GIT_OPT_SET_SERVER_TIMEOUT, connectTimeoutMs);
+    }
+
+    // Overall deadline for the whole repository fetch.
+    FetchCallbackPayload payload;
+    payload.worker = this;
+    payload.stopRequested = &m_stopRequested;
+    payload.deadline = std::chrono::steady_clock::now() +
+                       std::chrono::seconds(m_timeoutSeconds.load());
 
     bool allSuccessful = true;
     QStringList failedRemotes;
@@ -99,16 +121,16 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
 
     // Fetch from all remotes
     for (const GitRemote& remote : repo.remotes) {
-        if (m_stopRequested || timeoutOccurred) {
+        if (payload.shouldAbort()) {
             {
                 QMutexLocker locker(&g_gitMutex);
                 git_repository_free(repository);
             }
-            if (timeoutOccurred) {
-                emit fetchFinished(repo.name, false, QString("Fetch timed out after %1 seconds").arg(m_timeoutSeconds));
-            } else {
-                emit fetchFinished(repo.name, false, "Fetch cancelled");
-            }
+            const bool deadlineHit = std::chrono::steady_clock::now() >= payload.deadline;
+            emit fetchFinished(repo.name, false,
+                               deadlineHit
+                                   ? QString("Fetch timed out after %1 seconds").arg(m_timeoutSeconds.load())
+                                   : QString("Fetch cancelled"));
             return;
         }
 
@@ -135,21 +157,28 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
 
         // Set up authentication callback for SSH
         fetch_opts.callbacks.credentials = [](git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload) -> int {
-            GitFetchWorker *worker = static_cast<GitFetchWorker*>(payload);
-            return worker->sshKeyCallback(out, url, username_from_url, allowed_types, payload);
+            auto* cb = static_cast<FetchCallbackPayload*>(payload);
+            return cb->worker->sshKeyCallback(out, url, username_from_url, allowed_types, cb->worker);
         };
-        fetch_opts.callbacks.payload = this;
+        // Abort the transfer if the user stops or the overall deadline passes.
+        fetch_opts.callbacks.transfer_progress = [](const git_indexer_progress*, void *payload) -> int {
+            return abortIfNeeded(payload);
+        };
+        fetch_opts.callbacks.sideband_progress = [](const char*, int, void *payload) -> int {
+            return abortIfNeeded(payload);
+        };
+        fetch_opts.callbacks.payload = &payload;
 
         // Don't automatically download tags - let user control this
         fetch_opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_NONE;
-        
-        // Try to fetch with connection timeout
-        error = GitUtils::fetchRemoteWithTimeout(git_remote, fetch_opts, m_connectionTimeoutSeconds);
+
+        error = GitUtils::fetchRemoteWithTimeout(git_remote, fetch_opts, m_connectionTimeoutSeconds.load());
 
         if (error < 0) {
-            if (error == GIT_ETIMEOUT) {
-                // Connection timeout - this is a custom error code we return
-                failedRemotes.append(remote.name + " (connection timeout)");
+            if (std::chrono::steady_clock::now() >= payload.deadline) {
+                failedRemotes.append(remote.name + " (timed out)");
+            } else if (error == GIT_EUSER || m_stopRequested.load()) {
+                failedRemotes.append(remote.name + " (cancelled)");
             } else {
                 failedRemotes.append(remote.name);
             }
@@ -167,11 +196,8 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
         QMutexLocker locker(&g_gitMutex);
         git_repository_free(repository);
     }
-    timeoutTimer.stop();
 
-    if (timeoutOccurred) {
-        emit fetchFinished(repo.name, false, QString("Fetch timed out after %1 seconds").arg(m_timeoutSeconds));
-    } else if (allSuccessful) {
+    if (allSuccessful) {
         emit fetchFinished(repo.name, true, "All remotes fetched successfully");
     } else {
         emit fetchFinished(repo.name, false, QString("Some remotes failed: %1").arg(failedRemotes.join(", ")));
@@ -213,20 +239,4 @@ int GitFetchWorker::sshKeyCallback(git_credential **out, const char *url, const 
     }
 
     return GIT_EUSER; // User cancelled
-}
-
-void GitFetchWorker::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName)
-{
-    GitUtils::calculateRemoteCommitCounts(repository, remote, branch, repoName);
-    emit commitCountsUpdated(repoName, remote.name, remote.commitsAhead, remote.commitsBehind);
-}
-
-bool GitFetchWorker::isRepositoryValid(const QString& path)
-{
-    return GitUtils::isRepositoryValid(path);
-}
-
-int GitFetchWorker::fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds)
-{
-    return GitUtils::fetchRemoteWithTimeout(git_remote, fetch_opts, timeoutSeconds);
 }

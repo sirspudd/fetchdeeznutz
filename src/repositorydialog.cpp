@@ -6,6 +6,22 @@
 #include <QDialogButtonBox>
 #include <QMessageBox>
 
+namespace {
+// Roles used to store remote fields structurally on each list item, so the
+// remote name/URL never have to be recovered by parsing the display string
+// (which breaks for names or URLs containing the " - " separator).
+constexpr int RemoteNameRole = Qt::UserRole;
+constexpr int RemoteUrlRole = Qt::UserRole + 1;
+
+QListWidgetItem* makeRemoteItem(const QString& name, const QString& url)
+{
+    QListWidgetItem* item = new QListWidgetItem(QString("%1 - %2").arg(name, url));
+    item->setData(RemoteNameRole, name);
+    item->setData(RemoteUrlRole, url);
+    return item;
+}
+} // namespace
+
 RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
     : QDialog(parent)
 {
@@ -74,8 +90,7 @@ RepositoryDialog::RepositoryDialog(const GitRepository& repo, QWidget *parent)
 
     // Load existing remotes
     for (const GitRemote& remote : repo.remotes) {
-        QString itemText = QString("%1 - %2").arg(remote.name, remote.url);
-        remotesList->addItem(itemText);
+        remotesList->addItem(makeRemoteItem(remote.name, remote.url));
     }
 
     // Dialog buttons
@@ -95,15 +110,14 @@ GitRepository RepositoryDialog::getRepository() const
     repo.fetchInterval = intervalSpinBox->value();
     repo.enabled = enabledCheckBox->isChecked();
 
-    // Get remotes from the list
+    // Get remotes from the list (read structured data, not the display string)
     for (int i = 0; i < remotesList->count(); ++i) {
-        QString itemText = remotesList->item(i)->text();
-        QStringList parts = itemText.split(" - ");
-        if (parts.size() >= 2) {
-            GitRemote remote;
-            remote.name = parts[0];
-            remote.url = parts[1];
-            remote.status = "Ready";
+        QListWidgetItem* item = remotesList->item(i);
+        GitRemote remote;
+        remote.name = item->data(RemoteNameRole).toString();
+        remote.url = item->data(RemoteUrlRole).toString();
+        remote.status = "Ready";
+        if (!remote.name.isEmpty()) {
             repo.remotes.append(remote);
         }
     }
@@ -123,15 +137,13 @@ void RepositoryDialog::addRemote()
 
     // Check if remote name already exists
     for (int i = 0; i < remotesList->count(); ++i) {
-        QString itemText = remotesList->item(i)->text();
-        if (itemText.startsWith(name + " - ")) {
+        if (remotesList->item(i)->data(RemoteNameRole).toString() == name) {
             QMessageBox::warning(this, "Duplicate Remote", "A remote with this name already exists.");
             return;
         }
     }
 
-    QString itemText = QString("%1 - %2").arg(name, url);
-    remotesList->addItem(itemText);
+    remotesList->addItem(makeRemoteItem(name, url));
 
     remoteNameEdit->clear();
     remoteUrlEdit->clear();

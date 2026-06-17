@@ -13,6 +13,17 @@
 #include <QtConcurrent>
 #include <git2.h>
 
+namespace {
+// Stable identity for a repository, used as tree-item data. We deliberately
+// avoid storing raw pointers into the `repositories` QList: those dangle the
+// moment the list reallocates (append) or elements shift (erase). A name+path
+// key survives list mutations and lets us re-resolve the current element.
+QString repositoryKey(const QString& name, const QString& localPath)
+{
+    return name + QLatin1Char('\x1f') + localPath;
+}
+} // namespace
+
 FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     : QMainWindow(parent)
     , fetchTimer(new QTimer(this))
@@ -23,6 +34,13 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
 {
     // Initialize libgit2 FIRST - before any git operations
     git_libgit2_init();
+
+    // Concurrent fetches rely on libgit2 being thread-safe across independent
+    // repository handles, which requires it to be built with thread support.
+    if (!(git_libgit2_features() & GIT_FEATURE_THREADS)) {
+        qWarning() << "libgit2 was built without thread support; concurrent git "
+                      "operations may be unsafe.";
+    }
     
     setWindowTitle("Git Repository Fetcher");
     setMinimumSize(800, 600);
@@ -486,17 +504,30 @@ void FetchDeeznutzWindow::onRepositoryItemDoubleClicked(QTreeWidgetItem* item, i
         logMessage(QString("Repository %1: No fast-forwardable remote branch found").arg(repo->name));
         return;
     }
-    
-    // Perform the rebase
-    logMessage(QString("Rebasing %1/%2 against %3...").arg(repo->name, repo->branch, trackingRemote->name));
+
+    // This moves the local branch and working tree to the remote tip, so confirm
+    // before performing what is a potentially surprising, mutating operation.
+    const int ret = QMessageBox::question(
+        this,
+        "Fast-forward branch",
+        QString("Fast-forward %1/%2 to %3/%2?\n\nThis updates your local branch and "
+                "working tree to match the remote.")
+            .arg(repo->name, repo->branch, trackingRemote->name),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+
+    logMessage(QString("Fast-forwarding %1/%2 to %3...").arg(repo->name, repo->branch, trackingRemote->name));
     QString errorMessage;
     if (GitUtils::rebaseBranch(repo->localPath, repo->branch, trackingRemote->name, errorMessage)) {
-        logMessage(QString("✓ Successfully rebased %1/%2 against %3").arg(repo->name, repo->branch, trackingRemote->name));
-        // Recalculate commit counts after rebase
+        logMessage(QString("✓ Successfully fast-forwarded %1/%2 to %3").arg(repo->name, repo->branch, trackingRemote->name));
+        // Recalculate commit counts after the update
         calculateCommitCounts(*repo);
         updateRepositoryTree();
     } else {
-        logMessage(QString("✗ Failed to rebase %1/%2: %3").arg(repo->name, repo->branch, errorMessage));
+        logMessage(QString("✗ Failed to fast-forward %1/%2: %3").arg(repo->name, repo->branch, errorMessage));
     }
 }
 
@@ -741,7 +772,7 @@ void FetchDeeznutzWindow::updateRepositoryTree()
 
             QTreeWidgetItem* repoItem = new QTreeWidgetItem(pathItem);
             repoItem->setText(0, itemText);
-            repoItem->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(repo)));
+            repoItem->setData(0, Qt::UserRole, repositoryKey(repo->name, repo->localPath));
             
             // Set tooltip for the repository item
             QString tooltip = generateRepositoryTooltip(*repo);
@@ -779,8 +810,8 @@ void FetchDeeznutzWindow::updateRepositoryTree()
                 
                 QTreeWidgetItem* remoteItem = new QTreeWidgetItem(repoItem);
                 remoteItem->setText(0, remoteItemText);
-                // Store the repository pointer so we can find it from remote items
-                remoteItem->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(repo)));
+                // Store the repository key so we can resolve the repo from remote items
+                remoteItem->setData(0, Qt::UserRole, repositoryKey(repo->name, repo->localPath));
                 
                 // Set tooltip with remote details
                 QString remoteTooltip = QString("Remote: %1\nURL: %2\nStatus: %3\nAhead: %4 commits\nBehind: %5 commits")
@@ -851,28 +882,25 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
     updateRepositoryTree();
 }
 
-void FetchDeeznutzWindow::calculateCommitCountsAsync(GitRepository& repo)
+void FetchDeeznutzWindow::calculateCommitCountsAsync(const GitRepository& repo)
 {
-    // Store repo name and path for lookup in background thread (capture by value)
-    QString repoName = repo.name;
-    QString repoPath = repo.localPath;
-    
-    // Run commit count calculation in background thread
-    QtConcurrent::run([this, repoName, repoPath]() {
-        // Find the repository in our list (by name and path)
-        GitRepository* repoPtr = nullptr;
-        for (GitRepository& r : repositories) {
-            if (r.name == repoName && r.localPath == repoPath) {
-                repoPtr = &r;
-                break;
-            }
-        }
-        
-        if (!repoPtr) {
-            return; // Repository was removed
-        }
-        
-        if (!GitUtils::isRepositoryValid(repoPtr->localPath)) {
+    // Capture an immutable snapshot of everything the background thread needs.
+    // The worker never touches the shared `repositories` list; it computes into
+    // local copies and posts the results back to the main thread, which owns the
+    // list. This avoids data races and dangling pointers if the list is mutated
+    // (add/remove/scan) while the calculation is running.
+    const QString repoName = repo.name;
+    const QString repoPath = repo.localPath;
+    const QString branch = repo.branch;
+
+    QStringList remoteNames;
+    remoteNames.reserve(repo.remotes.size());
+    for (const GitRemote& remote : repo.remotes) {
+        remoteNames.append(remote.name);
+    }
+
+    [[maybe_unused]] QFuture<void> future = QtConcurrent::run([this, repoName, repoPath, branch, remoteNames]() {
+        if (!GitUtils::isRepositoryValid(repoPath)) {
             return;
         }
 
@@ -880,31 +908,30 @@ void FetchDeeznutzWindow::calculateCommitCountsAsync(GitRepository& repo)
         int error;
         {
             QMutexLocker locker(&g_gitMutex);
-            error = git_repository_open(&repository, repoPtr->localPath.toLocal8Bit().constData());
+            error = git_repository_open(&repository, repoPath.toLocal8Bit().constData());
         }
         if (error < 0) {
             return;
         }
 
-        for (GitRemote& remote : repoPtr->remotes) {
-            GitUtils::calculateRemoteCommitCounts(repository, remote, repoPtr->branch, repoPtr->name);
+        for (const QString& remoteName : remoteNames) {
+            GitRemote remote;
+            remote.name = remoteName;
+            GitUtils::calculateRemoteCommitCounts(repository, remote, branch, repoName);
+
+            const int ahead = remote.commitsAhead;
+            const int behind = remote.commitsBehind;
+            // Deliver results to the main thread, which owns `repositories`.
+            QMetaObject::invokeMethod(this, [this, repoName, remoteName, ahead, behind]() {
+                onCommitCountsUpdated(repoName, remoteName, ahead, behind);
+            }, Qt::QueuedConnection);
         }
 
         {
             QMutexLocker locker(&g_gitMutex);
             git_repository_free(repository);
         }
-        
-        // Update UI on main thread using QTimer::singleShot
-        QTimer::singleShot(0, this, [this]() {
-            updateRepositoryTree();
-        });
     });
-}
-
-void FetchDeeznutzWindow::calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName)
-{
-    GitUtils::calculateRemoteCommitCounts(repository, remote, branch, repoName);
 }
 
 void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryPath)
@@ -985,7 +1012,8 @@ QTreeWidgetItem* FetchDeeznutzWindow::createPathTreeItem(const QString& path)
 {
     QTreeWidgetItem* item = new QTreeWidgetItem();
     item->setText(0, path);
-    item->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(nullptr))); // Mark as path item
+    // Directory items carry no UserRole data; that's how they're distinguished
+    // from repository/remote items (which store a repository key).
     return item;
 }
 
@@ -1009,28 +1037,27 @@ GitRepository* FetchDeeznutzWindow::getRepositoryFromTreeItem(QTreeWidgetItem* i
 {
     if (!item) return nullptr;
 
-    QVariant data = item->data(0, Qt::UserRole);
-    if (data.isValid()) {
-        void* ptr = data.value<void*>();
-        if (ptr) {
-            // Check if this pointer matches any repository
+    const QVariant data = item->data(0, Qt::UserRole);
+    if (data.isValid() && data.metaType().id() == QMetaType::QString) {
+        const QString key = data.toString();
+        if (!key.isEmpty()) {
+            // Re-resolve against the live list; returns nullptr if the repo was
+            // removed since the tree was last built (stale key).
             for (GitRepository& repo : repositories) {
-                if (&repo == ptr) {
+                if (repositoryKey(repo.name, repo.localPath) == key) {
                     return &repo;
                 }
             }
-            // If not found, try casting (shouldn't happen, but be safe)
-            return static_cast<GitRepository*>(ptr);
+            return nullptr;
         }
     }
-    
-    // If no data or not a repository item, check if parent is a repository item
-    // (This handles remote items which are children of repository items)
-    QTreeWidgetItem* parent = item->parent();
-    if (parent) {
+
+    // No key on this item (e.g. a directory item). Remote items normally carry
+    // their own key, but fall back to the parent just in case.
+    if (QTreeWidgetItem* parent = item->parent()) {
         return getRepositoryFromTreeItem(parent);
     }
-    
+
     return nullptr;
 }
 
@@ -1198,51 +1225,6 @@ void FetchDeeznutzWindow::saveRepositories()
     logMessage("Configuration saved");
 }
 
-void FetchDeeznutzWindow::updateRepositoryList()
-{
-    updateRepositoryTree();
-}
-
-QStringList FetchDeeznutzWindow::findGitRepositories(const QString& directoryPath, const QStringList& excludeDirs)
-{
-    return GitUtils::findGitRepositories(directoryPath, excludeDirs);
-}
-
-bool FetchDeeznutzWindow::isGitRepository(const QString& path)
-{
-    return GitUtils::isGitRepository(path);
-}
-
-bool FetchDeeznutzWindow::isGitWorktree(const QString& path)
-{
-    return GitUtils::isGitWorktree(path);
-}
-
-QString FetchDeeznutzWindow::findMainGitRepository(const QString& path)
-{
-    return GitUtils::findMainGitRepository(path);
-}
-
-QStringList FetchDeeznutzWindow::findWorktreesForRepository(const QString& mainRepoPath)
-{
-    return GitUtils::findWorktreesForRepository(mainRepoPath);
-}
-
-QString FetchDeeznutzWindow::getRepositoryName(const QString& path)
-{
-    return GitUtils::getRepositoryName(path);
-}
-
-QList<GitRemote> FetchDeeznutzWindow::getRepositoryRemotes(const QString& path)
-{
-    return GitUtils::getRepositoryRemotes(path);
-}
-
-QString FetchDeeznutzWindow::getRepositoryBranch(const QString& path)
-{
-    return GitUtils::getRepositoryBranch(path);
-}
-
 QString FetchDeeznutzWindow::generateRepositoryTooltip(const GitRepository& repo)
 {
     QString tooltip = QString("<b>%1</b><br/>").arg(repo.name);
@@ -1287,9 +1269,4 @@ QString FetchDeeznutzWindow::generateRepositoryTooltip(const GitRepository& repo
     }
     
     return tooltip;
-}
-
-bool FetchDeeznutzWindow::isRepositoryValid(const QString& path)
-{
-    return GitUtils::isRepositoryValid(path);
 }
