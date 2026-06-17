@@ -3,9 +3,10 @@
 
 #include "gitmodels.h"
 #include <QObject>
-#include <QTimer>
+#include <QThreadPool>
 #include <git2.h>
 #include <atomic>
+#include <chrono>
 
 class GitFetchWorker : public QObject
 {
@@ -32,10 +33,16 @@ signals:
     void commitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
 
 private:
-    void performFetch(const GitRepository& repo);
+    // Fetch a single remote using its own repository handle (libgit2 handles are
+    // not shareable across threads). Emits the "Fetching..." transition; returns
+    // true on success and writes the resulting status label ("Success", "Error",
+    // "Timeout", "Cancelled").
+    bool fetchOneRemote(const QString& repoName, const QString& repoPath, const GitRemote& remote,
+                        std::chrono::steady_clock::time_point deadline, QString& statusLabel);
     QString getGitErrorMessage(int error) const;
     int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
 
+    QThreadPool m_pool; // bounded pool so independent remote fetches run concurrently
     std::atomic<bool> m_stopRequested;
     std::atomic<int> m_timeoutSeconds;
     std::atomic<int> m_connectionTimeoutSeconds;
