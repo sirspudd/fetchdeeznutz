@@ -31,6 +31,9 @@ signals:
     void fetchFinished(const QString& repoName, bool success, const QString& message);
     void fetchError(const QString& repoName, const QString& errorMessage);
     void commitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
+    // Emitted once per repository fetch when tags appeared that weren't present
+    // before the fetch (regardless of which remote delivered them).
+    void newTagsFound(const QString& repoName, const QStringList& tags);
 
 private:
     // Fetch a single remote using its own repository handle (libgit2 handles are
@@ -39,6 +42,9 @@ private:
     // "Timeout", "Cancelled").
     bool fetchOneRemote(const QString& repoName, const QString& repoPath, const GitRemote& remote,
                         std::chrono::steady_clock::time_point deadline, QString& statusLabel);
+    // Diff the repository's current tags against the pre-fetch snapshot and emit
+    // newTagsFound for any that appeared.
+    void checkForNewTags(const QString& repoName, const QString& repoPath, const QStringList& tagsBefore);
     QString getGitErrorMessage(int error) const;
     int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
 

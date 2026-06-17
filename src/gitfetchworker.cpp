@@ -40,7 +40,9 @@ int abortIfNeeded(void* payload) {
 struct RepoFetchState {
     QMutex mutex;
     QString repoName;
+    QString repoPath;
     QStringList remoteNames;
+    QStringList tagsBefore; // tag snapshot taken before any remote fetched
     QSet<QString> completed;
     QStringList failed;
     bool allSuccessful = true;
@@ -95,7 +97,10 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
 
     auto state = std::make_shared<RepoFetchState>();
     state->repoName = repo.name;
+    state->repoPath = repo.localPath;
     state->timeoutSeconds = timeoutSeconds;
+    // Snapshot tags up front so we can report any that the fetch brings in.
+    state->tagsBefore = GitUtils::listTags(repo.localPath);
     for (const GitRemote& remote : repo.remotes) {
         state->remoteNames.append(remote.name);
         emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Queued"));
@@ -118,23 +123,34 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
             QString statusLabel;
             const bool ok = fetchOneRemote(repoName, repoPath, r, deadline, statusLabel);
 
-            QMutexLocker lk(&state->mutex);
-            if (state->finished || state->completed.contains(r.name)) {
-                return;
-            }
-            state->completed.insert(r.name);
-            emit remoteStatusChanged(repoName, r.name, statusLabel);
-            if (!ok) {
-                state->allSuccessful = false;
-                state->failed.append(r.name);
-            }
-            if (state->completed.size() == state->remoteNames.size()) {
-                state->finished = true;
-                if (state->allSuccessful) {
-                    emit fetchFinished(repoName, true, "All remotes fetched successfully");
-                } else {
-                    emit fetchFinished(repoName, false, QString("Some remotes failed: %1").arg(state->failed.join(", ")));
+            bool doFinalize = false;
+            bool finishSuccess = false;
+            QString finishMessage;
+            {
+                QMutexLocker lk(&state->mutex);
+                if (state->finished || state->completed.contains(r.name)) {
+                    return;
                 }
+                state->completed.insert(r.name);
+                emit remoteStatusChanged(repoName, r.name, statusLabel);
+                if (!ok) {
+                    state->allSuccessful = false;
+                    state->failed.append(r.name);
+                }
+                if (state->completed.size() == state->remoteNames.size()) {
+                    state->finished = true;
+                    doFinalize = true;
+                    finishSuccess = state->allSuccessful;
+                    finishMessage = state->allSuccessful
+                                        ? QStringLiteral("All remotes fetched successfully")
+                                        : QString("Some remotes failed: %1").arg(state->failed.join(", "));
+                }
+            }
+            // Tag diff + fetchFinished are done outside the lock: they touch git
+            // (I/O) and only run once finalized, when no other task will mutate state.
+            if (doFinalize) {
+                emit fetchFinished(repoName, finishSuccess, finishMessage);
+                checkForNewTags(repoName, repoPath, state->tagsBefore);
             }
         });
     }
@@ -146,22 +162,27 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
     // The orphaned fetch keeps running until libgit2 returns, then sees
     // `finished` and quietly discards its result.
     QTimer::singleShot(timeoutSeconds * 1000, this, [this, state]() {
-        QMutexLocker lk(&state->mutex);
-        if (state->finished) {
-            return;
-        }
-        state->finished = true;
-        for (const QString& name : std::as_const(state->remoteNames)) {
-            if (!state->completed.contains(name)) {
-                emit remoteStatusChanged(state->repoName, name, QStringLiteral("Timeout"));
-                state->failed.append(name + " (timed out)");
-                state->allSuccessful = false;
+        QString message;
+        {
+            QMutexLocker lk(&state->mutex);
+            if (state->finished) {
+                return;
             }
+            state->finished = true;
+            for (const QString& name : std::as_const(state->remoteNames)) {
+                if (!state->completed.contains(name)) {
+                    emit remoteStatusChanged(state->repoName, name, QStringLiteral("Timeout"));
+                    state->failed.append(name + " (timed out)");
+                    state->allSuccessful = false;
+                }
+            }
+            message = QString("Fetch timed out after %1 seconds; %2 remote(s) still running in the background")
+                          .arg(state->timeoutSeconds)
+                          .arg(state->remoteNames.size() - state->completed.size());
         }
-        emit fetchFinished(state->repoName, false,
-                           QString("Fetch timed out after %1 seconds; %2 remote(s) still running in the background")
-                               .arg(state->timeoutSeconds)
-                               .arg(state->remoteNames.size() - state->completed.size()));
+        emit fetchFinished(state->repoName, false, message);
+        // Remotes that completed before the deadline may still have delivered tags.
+        checkForNewTags(state->repoName, state->repoPath, state->tagsBefore);
     });
 }
 
@@ -233,7 +254,9 @@ bool GitFetchWorker::fetchOneRemote(const QString& repoName, const QString& repo
         return abortIfNeeded(payload);
     };
     fetch_opts.callbacks.payload = &payload;
-    fetch_opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_NONE;
+    // Follow tags for the objects we download (the standard `git fetch` behavior),
+    // so new tags land locally and can be reported.
+    fetch_opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_AUTO;
 
     error = GitUtils::fetchRemoteWithTimeout(git_remote, fetch_opts, m_connectionTimeoutSeconds.load());
 
@@ -257,6 +280,24 @@ bool GitFetchWorker::fetchOneRemote(const QString& repoName, const QString& repo
         git_repository_free(repository);
     }
     return success;
+}
+
+void GitFetchWorker::checkForNewTags(const QString& repoName, const QString& repoPath, const QStringList& tagsBefore)
+{
+    const QStringList tagsAfter = GitUtils::listTags(repoPath);
+    if (tagsAfter.isEmpty()) {
+        return;
+    }
+    const QSet<QString> before(tagsBefore.begin(), tagsBefore.end());
+    QStringList newTags;
+    for (const QString& tag : tagsAfter) {
+        if (!before.contains(tag)) {
+            newTags.append(tag);
+        }
+    }
+    if (!newTags.isEmpty()) {
+        emit newTagsFound(repoName, newTags);
+    }
 }
 
 QString GitFetchWorker::getGitErrorMessage(int error) const

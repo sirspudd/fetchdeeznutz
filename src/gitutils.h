@@ -80,6 +80,12 @@ QString getGitErrorMessage(int error);
 int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds);
 
 /**
+ * List the shorthand names of all tags in a repository (e.g. "v1.2.0").
+ * Returns an empty list if the repository can't be opened.
+ */
+QStringList listTags(const QString& repoPath);
+
+/**
  * Check if a branch can be fast-forwarded (local is ancestor of remote)
  */
 bool canFastForward(const QString& repoPath, const QString& branch, const QString& remoteName);

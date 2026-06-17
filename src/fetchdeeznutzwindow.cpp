@@ -56,6 +56,7 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchWorker, &GitFetchWorker::fetchFinished, this, &FetchDeeznutzWindow::onBackgroundFetchFinished);
     connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
     connect(fetchWorker, &GitFetchWorker::commitCountsUpdated, this, &FetchDeeznutzWindow::onCommitCountsUpdated);
+    connect(fetchWorker, &GitFetchWorker::newTagsFound, this, &FetchDeeznutzWindow::onNewTagsFound);
     fetchThread->start();
     
     // Initial timeout values will be set in loadSettings()
@@ -635,6 +636,19 @@ void FetchDeeznutzWindow::updateFetchElapsed()
 {
     if (repositoryModel->refreshActiveRemotes() == 0) {
         fetchTicker->stop();
+    }
+}
+
+void FetchDeeznutzWindow::onNewTagsFound(const QString& repoName, const QStringList& tags)
+{
+    const QString tagList = tags.join(", ");
+    logMessage(QString("🏷 New tag%1 in %2: %3").arg(tags.size() > 1 ? "s" : "", repoName, tagList));
+
+    if (trayIcon && QSystemTrayIcon::supportsMessages()) {
+        const QString title = QString("New tag%1 in %2").arg(tags.size() > 1 ? "s" : "", repoName);
+        // Long timeout hint so the notification stays around until dismissed
+        // (the actual persistence is ultimately up to the platform's notifier).
+        trayIcon->showMessage(title, tagList, QSystemTrayIcon::Information, 24 * 60 * 60 * 1000);
     }
 }
 

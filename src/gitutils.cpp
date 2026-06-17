@@ -446,6 +446,28 @@ int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetc
     return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
 }
 
+QStringList listTags(const QString& repoPath) {
+    QMutexLocker locker(&g_gitMutex);
+
+    git_repository *repository = nullptr;
+    if (git_repository_open(&repository, repoPath.toLocal8Bit().constData()) < 0) {
+        return {};
+    }
+
+    git_strarray tags = {nullptr, 0};
+    QStringList result;
+    if (git_tag_list(&tags, repository) == 0) {
+        result.reserve(static_cast<int>(tags.count));
+        for (size_t i = 0; i < tags.count; ++i) {
+            result.append(QString::fromUtf8(tags.strings[i]));
+        }
+        git_strarray_dispose(&tags);
+    }
+
+    git_repository_free(repository);
+    return result;
+}
+
 bool canFastForward(const QString& repoPath, const QString& branch, const QString& remoteName) {
     QMutexLocker locker(&g_gitMutex);
     

@@ -70,6 +70,8 @@ private slots:
     void onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message);
     void onBackgroundFetchError(const QString& repoName, const QString& errorMessage);
     void onCommitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
+    // Shows a persistent tray notification when a fetch brings in new tags.
+    void onNewTagsFound(const QString& repoName, const QStringList& tags);
     // Repaints in-flight remotes once per second so their elapsed counter ticks.
     void updateFetchElapsed();
     
