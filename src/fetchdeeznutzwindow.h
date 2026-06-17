@@ -7,10 +7,11 @@
 #include "remoteselectiondialog.h"
 #include "repositorydialog.h"
 #include "repositorystore.h"
+#include "repositorytreemodel.h"
 
 #include <QMainWindow>
-#include <QTreeWidget>
-#include <QTreeWidgetItem>
+#include <QTreeView>
+#include <QModelIndex>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -57,7 +58,7 @@ private slots:
     void fetchSelected();
     void fetchAll();
     void onRepositorySelectionChanged();
-    void onRepositoryItemDoubleClicked(QTreeWidgetItem* item, int column);
+    void onRepositoryItemDoubleClicked(const QModelIndex& index);
     void onFetchIntervalChanged();
     void onFetchTimeoutChanged();
     void onConnectionTimeoutChanged();
@@ -90,14 +91,11 @@ private:
     void calculateCommitCounts(GitRepository& repo);
     void calculateCommitCountsAsync(const GitRepository& repo);
     void scanDirectoryForRepositories(const QString& directoryPath);
-    QTreeWidgetItem* createPathTreeItem(const QString& path);
-    QTreeWidgetItem* findOrCreatePathItem(const QString& path);
+    // Full structural rebuild of the tree (after add/remove/scan/load), keeping
+    // the current selection where possible.
     void updateRepositoryTree();
-    // Coalesces many rapid refresh requests (e.g. per-remote commit-count
-    // updates) into a single rebuild on the next event-loop iteration.
-    void scheduleTreeRefresh();
-    GitRepository* getRepositoryFromTreeItem(QTreeWidgetItem* item);
-    QString generateRepositoryTooltip(const GitRepository& repo);
+    // Resolves the repository backing a model index (repository or remote node).
+    GitRepository* repositoryForIndex(const QModelIndex& index);
     void loadSettings();
     void saveSettings();
     void updateAutoFetchControls();
@@ -106,7 +104,8 @@ private:
     void closeEvent(QCloseEvent *event) override;
 
     // UI components
-    QTreeWidget *repositoryTree;
+    QTreeView *repositoryView;
+    RepositoryTreeModel *repositoryModel;
     QMenu *contextMenu;
     QPushButton *addButton;
     QPushButton *addDirectoryButton;
@@ -143,7 +142,6 @@ private:
     QTimer *fetchTimer;
     int currentFetchIndex;
     bool isFetching;
-    bool m_treeRefreshScheduled = false;
 };
 
 #endif // FETCHDEEZNUTZWINDOW_H

@@ -31,6 +31,8 @@ set(PROJECT_SOURCES
         src/gitfetchworker.h
         src/repositorystore.cpp
         src/repositorystore.h
+        src/repositorytreemodel.cpp
+        src/repositorytreemodel.h
         src/remoteselectiondialog.cpp
         src/remoteselectiondialog.h
         src/repositorydialog.cpp

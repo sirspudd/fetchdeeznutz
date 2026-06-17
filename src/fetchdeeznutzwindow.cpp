@@ -12,18 +12,8 @@
 #include <QMutexLocker>
 #include <QtConcurrent>
 #include <QScrollBar>
+#include <QItemSelectionModel>
 #include <git2.h>
-
-namespace {
-// Stable identity for a repository, used as tree-item data. We deliberately
-// avoid storing raw pointers into the `repositories` QList: those dangle the
-// moment the list reallocates (append) or elements shift (erase). A name+path
-// key survives list mutations and lets us re-resolve the current element.
-QString repositoryKey(const QString& name, const QString& localPath)
-{
-    return name + QLatin1Char('\x1f') + localPath;
-}
-} // namespace
 
 FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -113,16 +103,17 @@ void FetchDeeznutzWindow::setupUI()
     QGroupBox *repoGroup = new QGroupBox("Repositories");
     QVBoxLayout *repoLayout = new QVBoxLayout(repoGroup);
 
-    repositoryTree = new QTreeWidget();
-    repositoryTree->setSelectionMode(QAbstractItemView::SingleSelection);
-    repositoryTree->setHeaderLabel("Repositories");
-    repositoryTree->setRootIsDecorated(true);
-    repositoryTree->setAlternatingRowColors(true);
-    repositoryTree->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(repositoryTree, &QTreeWidget::itemSelectionChanged, this, &FetchDeeznutzWindow::onRepositorySelectionChanged);
-    connect(repositoryTree, &QTreeWidget::customContextMenuRequested, this, &FetchDeeznutzWindow::showContextMenu);
-    connect(repositoryTree, &QTreeWidget::itemDoubleClicked, this, &FetchDeeznutzWindow::onRepositoryItemDoubleClicked);
-    repoLayout->addWidget(repositoryTree);
+    repositoryModel = new RepositoryTreeModel(&repositories, this);
+    repositoryView = new QTreeView();
+    repositoryView->setModel(repositoryModel);
+    repositoryView->setSelectionMode(QAbstractItemView::SingleSelection);
+    repositoryView->setRootIsDecorated(true);
+    repositoryView->setAlternatingRowColors(true);
+    repositoryView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(repositoryView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &FetchDeeznutzWindow::onRepositorySelectionChanged);
+    connect(repositoryView, &QTreeView::customContextMenuRequested, this, &FetchDeeznutzWindow::showContextMenu);
+    connect(repositoryView, &QTreeView::doubleClicked, this, &FetchDeeznutzWindow::onRepositoryItemDoubleClicked);
+    repoLayout->addWidget(repositoryView);
 
     // Setup context menu
     contextMenu = new QMenu(this);
@@ -303,8 +294,7 @@ void FetchDeeznutzWindow::addDirectory()
 
 void FetchDeeznutzWindow::editRepository()
 {
-    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
-    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
+    GitRepository* repo = repositoryForIndex(repositoryView->currentIndex());
     if (repo) {
         RepositoryDialog dialog(*repo, this);
         if (dialog.exec() == QDialog::Accepted) {
@@ -323,8 +313,7 @@ void FetchDeeznutzWindow::editRepository()
 
 void FetchDeeznutzWindow::removeRepository()
 {
-    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
-    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
+    GitRepository* repo = repositoryForIndex(repositoryView->currentIndex());
     if (repo) {
         QString repoName = repo->name;
         int ret = QMessageBox::question(this, "Remove Repository",
@@ -341,19 +330,18 @@ void FetchDeeznutzWindow::removeRepository()
 
 void FetchDeeznutzWindow::removeDirectory()
 {
-    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
-    if (!currentItem) return;
+    const QModelIndex currentIndex = repositoryView->currentIndex();
+    if (!currentIndex.isValid()) return;
 
-    // Check if this is a directory item (has no repository data)
-    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
-    if (repo) {
-        // If it's a repository item, remove just that repository
+    // If it's a repository row, remove just that repository.
+    if (repositoryModel->isRepository(currentIndex)) {
         removeRepository();
         return;
     }
 
-    // It's a directory item, get the directory path
-    QString dirPath = currentItem->text(0);
+    // It's a directory row, get the directory path.
+    QString dirPath = repositoryModel->directoryPath(currentIndex);
+    if (dirPath.isEmpty()) return;
     
     // Count repositories in this directory
     int repoCount = 0;
@@ -394,30 +382,30 @@ void FetchDeeznutzWindow::removeDirectory()
 
 void FetchDeeznutzWindow::showContextMenu(const QPoint& pos)
 {
-    QTreeWidgetItem* item = repositoryTree->itemAt(pos);
-    if (!item) return;
+    const QModelIndex index = repositoryView->indexAt(pos);
+    if (!index.isValid()) return;
 
-    // Get the actions from the context menu
+    // Make sure the right-clicked row is the current one so the remove actions
+    // operate on it.
+    repositoryView->setCurrentIndex(index);
+
     QList<QAction*> actions = contextMenu->actions();
     QAction* removeRepoAction = actions[0]; // "Remove Repository"
     QAction* removeDirAction = actions[1];  // "Remove Directory"
 
-    // Check if this is a repository item or directory item
-    GitRepository* repo = getRepositoryFromTreeItem(item);
-    if (repo) {
-        // It's a repository item
+    if (repositoryModel->isRepository(index)) {
         removeRepoAction->setVisible(true);
         removeDirAction->setVisible(false);
-        removeRepoAction->setText("Remove Repository");
-    } else {
-        // It's a directory item
+    } else if (repositoryModel->isDirectory(index)) {
         removeRepoAction->setVisible(false);
         removeDirAction->setVisible(true);
-        removeDirAction->setText("Remove Directory");
+    } else {
+        // Remote row: offer repository removal for its parent repo.
+        removeRepoAction->setVisible(true);
+        removeDirAction->setVisible(false);
     }
 
-    // Show the context menu
-    contextMenu->exec(repositoryTree->mapToGlobal(pos));
+    contextMenu->exec(repositoryView->viewport()->mapToGlobal(pos));
 }
 
 void FetchDeeznutzWindow::fetchSelected()
@@ -427,8 +415,7 @@ void FetchDeeznutzWindow::fetchSelected()
         return;
     }
     
-    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
-    GitRepository* repo = getRepositoryFromTreeItem(currentItem);
+    GitRepository* repo = repositoryForIndex(repositoryView->currentIndex());
     if (repo) {
         // Make a copy to ensure thread safety
         GitRepository repoCopy = *repo;
@@ -463,32 +450,21 @@ void FetchDeeznutzWindow::fetchAll()
 
 void FetchDeeznutzWindow::onRepositorySelectionChanged()
 {
-    QTreeWidgetItem* currentItem = repositoryTree->currentItem();
-    bool hasSelection = currentItem && getRepositoryFromTreeItem(currentItem) != nullptr;
+    const bool hasSelection = repositoryForIndex(repositoryView->currentIndex()) != nullptr;
     editButton->setEnabled(hasSelection);
     removeButton->setEnabled(hasSelection);
     fetchSelectedButton->setEnabled(hasSelection);
 }
 
-void FetchDeeznutzWindow::onRepositoryItemDoubleClicked(QTreeWidgetItem* item, int column)
+void FetchDeeznutzWindow::onRepositoryItemDoubleClicked(const QModelIndex& index)
 {
-    Q_UNUSED(column);
-    
-    if (!item) return;
-    
-    // Get the repository from the item
-    GitRepository* repo = getRepositoryFromTreeItem(item);
+    // Only act on repository rows (not directory or remote rows).
+    if (!repositoryModel->isRepository(index)) {
+        return;
+    }
+    GitRepository* repo = repositoryForIndex(index);
     if (!repo) return;
-    
-    // Only handle repository items (not path items or remote items)
-    // A repository item is one that has a parent (path item) but is not a remote item
-    QTreeWidgetItem* parent = item->parent();
-    if (!parent) return; // Top-level path item
-    
-    // Check if this is a remote item (has a repository as parent)
-    QTreeWidgetItem* grandparent = parent->parent();
-    if (grandparent) return; // This is a remote item, not a repository item
-    
+
     // Find the tracking remote (the one with commitsBehind > 0 and can be fast-forwarded)
     GitRemote* trackingRemote = nullptr;
     for (GitRemote& remote : repo->remotes) {
@@ -623,7 +599,7 @@ void FetchDeeznutzWindow::onBackgroundFetchStarted(const QString& repoName)
     for (GitRepository& repo : repositories) {
         if (repo.name == repoName) {
             repo.status = "Fetching...";
-            scheduleTreeRefresh();
+            repositoryModel->updateRepositoryStatus(repoName);
             break;
         }
     }
@@ -648,7 +624,7 @@ void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, boo
             if (success) {
                 repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
             }
-            scheduleTreeRefresh();
+            repositoryModel->updateRepositoryStatus(repoName);
             saveRepositories();
             break;
         }
@@ -663,7 +639,7 @@ void FetchDeeznutzWindow::onBackgroundFetchError(const QString& repoName, const 
     for (GitRepository& repo : repositories) {
         if (repo.name == repoName) {
             repo.status = "Error";
-            scheduleTreeRefresh();
+            repositoryModel->updateRepositoryStatus(repoName);
             saveRepositories();
             break;
         }
@@ -679,7 +655,7 @@ void FetchDeeznutzWindow::onCommitCountsUpdated(const QString& repoName, const Q
                 if (remote.name == remoteName) {
                     remote.commitsAhead = commitsAhead;
                     remote.commitsBehind = commitsBehind;
-                    scheduleTreeRefresh();
+                    repositoryModel->updateRemoteCounts(repoName, remoteName);
                     break;
                 }
             }
@@ -728,142 +704,26 @@ void FetchDeeznutzWindow::closeEvent(QCloseEvent *event)
     event->ignore();
 }
 
-void FetchDeeznutzWindow::scheduleTreeRefresh()
-{
-    if (m_treeRefreshScheduled) {
-        return;
-    }
-    m_treeRefreshScheduled = true;
-    QTimer::singleShot(0, this, [this]() {
-        m_treeRefreshScheduled = false;
-        updateRepositoryTree();
-    });
-}
-
 void FetchDeeznutzWindow::updateRepositoryTree()
 {
-    // Preserve the user's selection and scroll position across the rebuild so
-    // background-driven refreshes don't yank the view around.
-    QString selectedKey;
-    if (QTreeWidgetItem* current = repositoryTree->currentItem()) {
-        selectedKey = current->data(0, Qt::UserRole).toString();
+    // Remember the selected repository so we can restore it after the rebuild.
+    QString selectedName, selectedPath;
+    if (GitRepository* selected = repositoryForIndex(repositoryView->currentIndex())) {
+        selectedName = selected->name;
+        selectedPath = selected->localPath;
     }
-    const int scrollValue = repositoryTree->verticalScrollBar()->value();
+    const int scrollValue = repositoryView->verticalScrollBar()->value();
 
-    repositoryTree->clear();
+    repositoryModel->rebuild();
+    repositoryView->expandAll();
 
-    // Create a map to organize repositories by path
-    QMap<QString, QList<GitRepository*>> pathMap;
-    for (GitRepository& repo : repositories) {
-        QString dirPath = QFileInfo(repo.localPath).absolutePath();
-        pathMap[dirPath].append(&repo);
-    }
-
-    // Create tree structure
-    for (auto it = pathMap.begin(); it != pathMap.end(); ++it) {
-        QString path = it.key();
-        QList<GitRepository*> repos = it.value();
-
-        // Create path item
-        QTreeWidgetItem* pathItem = findOrCreatePathItem(path);
-
-        // Add repositories under this path
-        for (GitRepository* repo : repos) {
-            QString statusIcon = repo->enabled ? "●" : "○";
-            QString statusText = repo->status.isEmpty() ? "Ready" : repo->status;
-            
-            // Add special icons for different status types
-            if (statusText == "Timeout") {
-                statusIcon = "⏰";
-            } else if (statusText == "Error") {
-                statusIcon = "❌";
-            } else if (statusText == "Success") {
-                statusIcon = "✅";
-            } else if (statusText == "Fetching...") {
-                statusIcon = "🔄";
-            }
-            
-            // Repository item text
-            QString itemText = QString("%1 %2 - %3 (%4) [%5 remotes]")
-                              .arg(statusIcon)
-                              .arg(repo->name)
-                              .arg(statusText)
-                              .arg(repo->branch)
-                              .arg(repo->remotes.size());
-
-            QTreeWidgetItem* repoItem = new QTreeWidgetItem(pathItem);
-            repoItem->setText(0, itemText);
-            repoItem->setData(0, Qt::UserRole, repositoryKey(repo->name, repo->localPath));
-            
-            // Set tooltip for the repository item
-            QString tooltip = generateRepositoryTooltip(*repo);
-            repoItem->setToolTip(0, tooltip);
-            
-            // Add each remote as a child item with its own commit counts
-            for (const GitRemote& remote : repo->remotes) {
-                QString remoteStatusIcon = "●";
-                QString remoteStatus = remote.status.isEmpty() ? "Ready" : remote.status;
-                
-                if (remoteStatus == "Error") {
-                    remoteStatusIcon = "❌";
-                } else if (remoteStatus == "Success") {
-                    remoteStatusIcon = "✅";
-                } else if (remoteStatus == "Fetching...") {
-                    remoteStatusIcon = "🔄";
-                }
-                
-                QString remoteCommitDeltaText;
-                if (remote.commitsAhead > 0 && remote.commitsBehind > 0) {
-                    remoteCommitDeltaText = QString(" [+%1/-%2]").arg(remote.commitsAhead).arg(remote.commitsBehind);
-                } else if (remote.commitsAhead > 0) {
-                    remoteCommitDeltaText = QString(" [+%1]").arg(remote.commitsAhead);
-                } else if (remote.commitsBehind > 0) {
-                    remoteCommitDeltaText = QString(" [-%1]").arg(remote.commitsBehind);
-                } else {
-                    remoteCommitDeltaText = " [up-to-date]";
-                }
-                
-                QString remoteItemText = QString("%1 %2 - %3%4")
-                                        .arg(remoteStatusIcon)
-                                        .arg(remote.name)
-                                        .arg(remote.url)
-                                        .arg(remoteCommitDeltaText);
-                
-                QTreeWidgetItem* remoteItem = new QTreeWidgetItem(repoItem);
-                remoteItem->setText(0, remoteItemText);
-                // Store the repository key so we can resolve the repo from remote items
-                remoteItem->setData(0, Qt::UserRole, repositoryKey(repo->name, repo->localPath));
-                
-                // Set tooltip with remote details
-                QString remoteTooltip = QString("Remote: %1\nURL: %2\nStatus: %3\nAhead: %4 commits\nBehind: %5 commits")
-                                       .arg(remote.name)
-                                       .arg(remote.url)
-                                       .arg(remoteStatus)
-                                       .arg(remote.commitsAhead)
-                                       .arg(remote.commitsBehind);
-                if (!remote.lastFetch.isEmpty()) {
-                    remoteTooltip += QString("\nLast fetch: %1").arg(remote.lastFetch);
-                }
-                remoteItem->setToolTip(0, remoteTooltip);
-            }
+    if (!selectedName.isEmpty()) {
+        const QModelIndex restored = repositoryModel->indexForRepository(selectedName, selectedPath);
+        if (restored.isValid()) {
+            repositoryView->setCurrentIndex(restored);
         }
     }
-
-    // Expand all items by default
-    repositoryTree->expandAll();
-
-    // Restore the previously selected item (by key) and scroll position.
-    if (!selectedKey.isEmpty()) {
-        QTreeWidgetItemIterator it(repositoryTree);
-        while (*it) {
-            if ((*it)->data(0, Qt::UserRole).toString() == selectedKey) {
-                repositoryTree->setCurrentItem(*it);
-                break;
-            }
-            ++it;
-        }
-    }
-    repositoryTree->verticalScrollBar()->setValue(scrollValue);
+    repositoryView->verticalScrollBar()->setValue(scrollValue);
 }
 
 void FetchDeeznutzWindow::startScheduledFetch()
@@ -1042,57 +902,13 @@ void FetchDeeznutzWindow::scanDirectoryForRepositories(const QString& directoryP
     logMessage(QString("Directory scan complete: %1 repositories added, %2 skipped (already exist)").arg(addedCount).arg(skippedCount));
 }
 
-QTreeWidgetItem* FetchDeeznutzWindow::createPathTreeItem(const QString& path)
+GitRepository* FetchDeeznutzWindow::repositoryForIndex(const QModelIndex& index)
 {
-    QTreeWidgetItem* item = new QTreeWidgetItem();
-    item->setText(0, path);
-    // Directory items carry no UserRole data; that's how they're distinguished
-    // from repository/remote items (which store a repository key).
-    return item;
-}
-
-QTreeWidgetItem* FetchDeeznutzWindow::findOrCreatePathItem(const QString& path)
-{
-    // Find existing path item
-    for (int i = 0; i < repositoryTree->topLevelItemCount(); ++i) {
-        QTreeWidgetItem* item = repositoryTree->topLevelItem(i);
-        if (item->text(0) == path) {
-            return item;
-        }
+    const int repoIndex = repositoryModel->repositoryIndex(index);
+    if (repoIndex < 0 || repoIndex >= repositories.size()) {
+        return nullptr;
     }
-
-    // Create new path item
-    QTreeWidgetItem* pathItem = createPathTreeItem(path);
-    repositoryTree->addTopLevelItem(pathItem);
-    return pathItem;
-}
-
-GitRepository* FetchDeeznutzWindow::getRepositoryFromTreeItem(QTreeWidgetItem* item)
-{
-    if (!item) return nullptr;
-
-    const QVariant data = item->data(0, Qt::UserRole);
-    if (data.isValid() && data.metaType().id() == QMetaType::QString) {
-        const QString key = data.toString();
-        if (!key.isEmpty()) {
-            // Re-resolve against the live list; returns nullptr if the repo was
-            // removed since the tree was last built (stale key).
-            for (GitRepository& repo : repositories) {
-                if (repositoryKey(repo.name, repo.localPath) == key) {
-                    return &repo;
-                }
-            }
-            return nullptr;
-        }
-    }
-
-    // No key on this item (e.g. a directory item). Remote items normally carry
-    // their own key, but fall back to the parent just in case.
-    if (QTreeWidgetItem* parent = item->parent()) {
-        return getRepositoryFromTreeItem(parent);
-    }
-
-    return nullptr;
+    return &repositories[repoIndex];
 }
 
 void FetchDeeznutzWindow::logMessage(const QString& message)
@@ -1172,48 +988,3 @@ void FetchDeeznutzWindow::saveRepositories()
     }
 }
 
-QString FetchDeeznutzWindow::generateRepositoryTooltip(const GitRepository& repo)
-{
-    QString tooltip = QString("<b>%1</b><br/>").arg(repo.name);
-    tooltip += QString("Path: %1<br/>").arg(repo.localPath);
-    tooltip += QString("Branch: %1<br/>").arg(repo.branch);
-    tooltip += QString("Status: %1<br/>").arg(repo.status.isEmpty() ? "Ready" : repo.status);
-    
-    if (!repo.lastFetch.isEmpty()) {
-        tooltip += QString("Last Fetch: %1<br/>").arg(repo.lastFetch);
-    }
-    
-    tooltip += QString("Fetch Interval: %1 minutes<br/>").arg(repo.fetchInterval);
-    tooltip += QString("Enabled: %1<br/><br/>").arg(repo.enabled ? "Yes" : "No");
-    
-    if (repo.remotes.isEmpty()) {
-        tooltip += "<b>No remotes configured</b>";
-    } else {
-        tooltip += QString("<b>Remotes (%1):</b><br/>").arg(repo.remotes.size());
-        for (const GitRemote& remote : repo.remotes) {
-            tooltip += QString("• <b>%1</b><br/>").arg(remote.name);
-            tooltip += QString("  URL: %1<br/>").arg(remote.url);
-            tooltip += QString("  Status: %1<br/>").arg(remote.status.isEmpty() ? "Ready" : remote.status);
-            
-            if (remote.commitsAhead > 0 || remote.commitsBehind > 0) {
-                tooltip += QString("  Commits: ");
-                if (remote.commitsAhead > 0) {
-                    tooltip += QString("+%1 ahead").arg(remote.commitsAhead);
-                }
-                if (remote.commitsAhead > 0 && remote.commitsBehind > 0) {
-                    tooltip += ", ";
-                }
-                if (remote.commitsBehind > 0) {
-                    tooltip += QString("-%1 behind").arg(remote.commitsBehind);
-                }
-                tooltip += "<br/>";
-            }
-            
-            if (!remote.lastFetch.isEmpty()) {
-                tooltip += QString("  Last Fetch: %1<br/>").arg(remote.lastFetch);
-            }
-        }
-    }
-    
-    return tooltip;
-}
