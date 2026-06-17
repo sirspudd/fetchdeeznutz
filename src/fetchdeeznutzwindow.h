@@ -6,6 +6,7 @@
 #include "gitutils.h"
 #include "remoteselectiondialog.h"
 #include "repositorydialog.h"
+#include "repositorystore.h"
 
 #include <QMainWindow>
 #include <QTreeWidget>
@@ -86,13 +87,15 @@ private:
     void stopScheduledFetch();
     void fetchRepository(GitRepository& repo);
     void logMessage(const QString& message);
-    QString getConfigFilePath() const;
     void calculateCommitCounts(GitRepository& repo);
     void calculateCommitCountsAsync(const GitRepository& repo);
     void scanDirectoryForRepositories(const QString& directoryPath);
     QTreeWidgetItem* createPathTreeItem(const QString& path);
     QTreeWidgetItem* findOrCreatePathItem(const QString& path);
     void updateRepositoryTree();
+    // Coalesces many rapid refresh requests (e.g. per-remote commit-count
+    // updates) into a single rebuild on the next event-loop iteration.
+    void scheduleTreeRefresh();
     GitRepository* getRepositoryFromTreeItem(QTreeWidgetItem* item);
     QString generateRepositoryTooltip(const GitRepository& repo);
     void loadSettings();
@@ -135,10 +138,12 @@ private:
     QVBoxLayout *fetchStatusLayout;
 
     // Data
+    RepositoryStore m_store;
     QList<GitRepository> repositories;
     QTimer *fetchTimer;
     int currentFetchIndex;
     bool isFetching;
+    bool m_treeRefreshScheduled = false;
 };
 
 #endif // FETCHDEEZNUTZWINDOW_H

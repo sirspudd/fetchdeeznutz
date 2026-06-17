@@ -11,6 +11,7 @@
 #include <QMetaType>
 #include <QMutexLocker>
 #include <QtConcurrent>
+#include <QScrollBar>
 #include <git2.h>
 
 namespace {
@@ -622,7 +623,7 @@ void FetchDeeznutzWindow::onBackgroundFetchStarted(const QString& repoName)
     for (GitRepository& repo : repositories) {
         if (repo.name == repoName) {
             repo.status = "Fetching...";
-            updateRepositoryTree();
+            scheduleTreeRefresh();
             break;
         }
     }
@@ -647,7 +648,7 @@ void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, boo
             if (success) {
                 repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
             }
-            updateRepositoryTree();
+            scheduleTreeRefresh();
             saveRepositories();
             break;
         }
@@ -662,7 +663,7 @@ void FetchDeeznutzWindow::onBackgroundFetchError(const QString& repoName, const 
     for (GitRepository& repo : repositories) {
         if (repo.name == repoName) {
             repo.status = "Error";
-            updateRepositoryTree();
+            scheduleTreeRefresh();
             saveRepositories();
             break;
         }
@@ -678,7 +679,7 @@ void FetchDeeznutzWindow::onCommitCountsUpdated(const QString& repoName, const Q
                 if (remote.name == remoteName) {
                     remote.commitsAhead = commitsAhead;
                     remote.commitsBehind = commitsBehind;
-                    updateRepositoryTree();
+                    scheduleTreeRefresh();
                     break;
                 }
             }
@@ -727,8 +728,28 @@ void FetchDeeznutzWindow::closeEvent(QCloseEvent *event)
     event->ignore();
 }
 
+void FetchDeeznutzWindow::scheduleTreeRefresh()
+{
+    if (m_treeRefreshScheduled) {
+        return;
+    }
+    m_treeRefreshScheduled = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_treeRefreshScheduled = false;
+        updateRepositoryTree();
+    });
+}
+
 void FetchDeeznutzWindow::updateRepositoryTree()
 {
+    // Preserve the user's selection and scroll position across the rebuild so
+    // background-driven refreshes don't yank the view around.
+    QString selectedKey;
+    if (QTreeWidgetItem* current = repositoryTree->currentItem()) {
+        selectedKey = current->data(0, Qt::UserRole).toString();
+    }
+    const int scrollValue = repositoryTree->verticalScrollBar()->value();
+
     repositoryTree->clear();
 
     // Create a map to organize repositories by path
@@ -830,6 +851,19 @@ void FetchDeeznutzWindow::updateRepositoryTree()
 
     // Expand all items by default
     repositoryTree->expandAll();
+
+    // Restore the previously selected item (by key) and scroll position.
+    if (!selectedKey.isEmpty()) {
+        QTreeWidgetItemIterator it(repositoryTree);
+        while (*it) {
+            if ((*it)->data(0, Qt::UserRole).toString() == selectedKey) {
+                repositoryTree->setCurrentItem(*it);
+                break;
+            }
+            ++it;
+        }
+    }
+    repositoryTree->verticalScrollBar()->setValue(scrollValue);
 }
 
 void FetchDeeznutzWindow::startScheduledFetch()
@@ -1067,13 +1101,6 @@ void FetchDeeznutzWindow::logMessage(const QString& message)
     logTextEdit->append(QString("[%1] %2").arg(timestamp, message));
 }
 
-QString FetchDeeznutzWindow::getConfigFilePath() const
-{
-    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    QDir().mkpath(configDir);
-    return QDir(configDir).filePath("repositories.json");
-}
-
 void FetchDeeznutzWindow::loadSettings()
 {
     QSettings settings;
@@ -1122,107 +1149,27 @@ void FetchDeeznutzWindow::updateAutoFetchControls()
 
 void FetchDeeznutzWindow::loadRepositories()
 {
-    QString configPath = getConfigFilePath();
-    QFile file(configPath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        logMessage("No existing configuration found, starting fresh");
-        return;
+    RepositoryStore::LoadResult result = m_store.load();
+    for (const QString& message : result.messages) {
+        logMessage(message);
     }
 
-    QByteArray data = file.readAll();
-    file.close();
-    
-    if (data.isEmpty()) {
-        logMessage("Configuration file is empty, starting fresh");
-        return;
-    }
-
-    QJsonParseError parseError;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
-    
-    if (parseError.error != QJsonParseError::NoError) {
-        logMessage(QString("Failed to parse configuration file: %1 at offset %2")
-                   .arg(parseError.errorString())
-                   .arg(parseError.offset));
-        logMessage("Configuration file may be corrupted. Starting fresh.");
-        // Backup the corrupted file
-        QString backupPath = configPath + ".corrupted." + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
-        QFile::copy(configPath, backupPath);
-        logMessage(QString("Corrupted file backed up to: %1").arg(backupPath));
-        return;
-    }
-    
-    if (!doc.isArray()) {
-        logMessage("Configuration file format is invalid (expected array), starting fresh");
-        return;
-    }
-    
-    QJsonArray array = doc.array();
-
-    repositories.clear();
-    for (const QJsonValue& value : array) {
-        if (value.isObject()) {
-            try {
-                repositories.append(GitRepository::fromJson(value.toObject()));
-            } catch (...) {
-                logMessage("Warning: Skipped invalid repository entry in configuration");
-            }
-        }
-    }
-
-    logMessage(QString("Loaded %1 repositories from configuration").arg(repositories.size()));
+    repositories = result.repositories;
 
     // Calculate commit counts for loaded repositories asynchronously
-    for (GitRepository& repo : repositories) {
+    for (const GitRepository& repo : repositories) {
         calculateCommitCountsAsync(repo);
     }
 }
 
 void FetchDeeznutzWindow::saveRepositories()
 {
-    QJsonArray array;
-    for (const GitRepository& repo : repositories) {
-        array.append(repo.toJson());
+    QString error;
+    if (m_store.save(repositories, &error)) {
+        logMessage("Configuration saved");
+    } else {
+        logMessage(QString("Failed to save configuration: %1").arg(error));
     }
-
-    QJsonDocument doc(array);
-    QString configPath = getConfigFilePath();
-    QString tempPath = configPath + ".tmp";
-    
-    // Write to temporary file first to avoid corruption if crash occurs
-    QFile tempFile(tempPath);
-    if (!tempFile.open(QIODevice::WriteOnly)) {
-        logMessage("Failed to save configuration: cannot create temporary file");
-        return;
-    }
-    
-    QByteArray jsonData = doc.toJson();
-    if (tempFile.write(jsonData) != jsonData.size()) {
-        logMessage("Failed to save configuration: write error");
-        tempFile.remove();
-        return;
-    }
-    
-    if (!tempFile.flush()) {
-        logMessage("Failed to save configuration: flush error");
-        tempFile.remove();
-        return;
-    }
-    tempFile.close();
-    
-    // Atomically replace the original file with the temporary file
-    QFile oldFile(configPath);
-    if (oldFile.exists()) {
-        oldFile.remove();
-    }
-    
-    if (!QFile::rename(tempPath, configPath)) {
-        logMessage("Failed to save configuration: cannot replace file");
-        QFile::remove(tempPath);
-        return;
-    }
-    
-    logMessage("Configuration saved");
 }
 
 QString FetchDeeznutzWindow::generateRepositoryTooltip(const GitRepository& repo)

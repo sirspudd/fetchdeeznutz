@@ -29,6 +29,8 @@ set(PROJECT_SOURCES
         src/gitutils.h
         src/gitfetchworker.cpp
         src/gitfetchworker.h
+        src/repositorystore.cpp
+        src/repositorystore.h
         src/remoteselectiondialog.cpp
         src/remoteselectiondialog.h
         src/repositorydialog.cpp

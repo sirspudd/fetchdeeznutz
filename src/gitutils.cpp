@@ -324,28 +324,21 @@ void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, 
         }
     }
     
-    // If no upstream tracking branch for this remote, try to find the remote branch manually
+    // If there's no upstream tracking branch for this remote, look for the
+    // remote-tracking ref of the *same* branch name. We deliberately do NOT
+    // fall back to guessing main/master/develop: comparing the local branch
+    // against an unrelated remote branch produces misleading ahead/behind
+    // counts. If there's no corresponding remote branch, there's nothing
+    // meaningful to compare, so report 0/0.
     if (!remoteBranch) {
         QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, branch);
         error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
 
         if (error < 0) {
-            // Try the remote's default branch (usually main or master)
-            QStringList defaultBranches = {"main", "master", "develop"};
-            for (const QString& defaultBranch : defaultBranches) {
-                remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, defaultBranch);
-                error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
-                if (error >= 0) {
-                    break;
-                }
-            }
-            
-            if (error < 0) {
-                git_reference_free(localBranch);
-                remote.commitsAhead = 0;
-                remote.commitsBehind = 0;
-                return;
-            }
+            git_reference_free(localBranch);
+            remote.commitsAhead = 0;
+            remote.commitsBehind = 0;
+            return;
         }
     }
 
