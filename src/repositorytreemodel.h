@@ -46,6 +46,11 @@ public:
     void updateRepositoryStatus(const QString& repoName);
     /** Emit dataChanged for the matching remote row(s). */
     void updateRemoteCounts(const QString& repoName, const QString& remoteName);
+    /**
+     * Repaint every remote currently in the "Fetching..." state so its live
+     * elapsed counter advances. Returns the number of remotes still in flight.
+     */
+    int refreshActiveRemotes();
 
     // Queries used by the view/controller
     bool isRepository(const QModelIndex& index) const;

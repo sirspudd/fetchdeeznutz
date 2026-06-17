@@ -18,6 +18,7 @@
 FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     : QMainWindow(parent)
     , fetchTimer(new QTimer(this))
+    , fetchTicker(new QTimer(this))
     , fetchThread(new QThread(this))
     , fetchWorker(new GitFetchWorker())
     , currentFetchIndex(-1)
@@ -69,6 +70,11 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
 
     // Connect timer for scheduled fetching
     connect(fetchTimer, &QTimer::timeout, this, &FetchDeeznutzWindow::performScheduledFetch);
+
+    // 1s heartbeat that animates the elapsed counter on in-flight remotes; only
+    // runs while at least one remote is actively fetching.
+    fetchTicker->setInterval(1000);
+    connect(fetchTicker, &QTimer::timeout, this, &FetchDeeznutzWindow::updateFetchElapsed);
 
     // Start timer based on loaded settings
     if (autoFetchCheckBox->isChecked()) {
@@ -623,7 +629,12 @@ void FetchDeeznutzWindow::onRemoteStatusChanged(const QString& repoName, const Q
         for (GitRemote& remote : repo.remotes) {
             if (remote.name == remoteName) {
                 remote.status = status;
-                if (status == "Success") {
+                if (status == "Fetching...") {
+                    remote.fetchStartMs = QDateTime::currentMSecsSinceEpoch();
+                    if (!fetchTicker->isActive()) {
+                        fetchTicker->start();
+                    }
+                } else if (status == "Success") {
                     remote.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
                 }
                 repositoryModel->updateRemoteCounts(repoName, remoteName);
@@ -631,6 +642,13 @@ void FetchDeeznutzWindow::onRemoteStatusChanged(const QString& repoName, const Q
             }
         }
         break;
+    }
+}
+
+void FetchDeeznutzWindow::updateFetchElapsed()
+{
+    if (repositoryModel->refreshActiveRemotes() == 0) {
+        fetchTicker->stop();
     }
 }
 

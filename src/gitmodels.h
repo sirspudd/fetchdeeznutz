@@ -18,6 +18,9 @@ struct GitRemote {
     QString status;
     int commitsAhead;
     int commitsBehind;
+    // Transient: epoch-ms when this remote entered the "Fetching..." state, used
+    // to render a live elapsed counter. Not persisted to JSON.
+    qint64 fetchStartMs = 0;
 
     GitRemote() : commitsAhead(0), commitsBehind(0) {}
 

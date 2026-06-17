@@ -72,6 +72,8 @@ private slots:
     void onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message);
     void onBackgroundFetchError(const QString& repoName, const QString& errorMessage);
     void onCommitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
+    // Repaints in-flight remotes once per second so their elapsed counter ticks.
+    void updateFetchElapsed();
     
     // System tray slots
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
@@ -141,6 +143,7 @@ private:
     RepositoryStore m_store;
     QList<GitRepository> repositories;
     QTimer *fetchTimer;
+    QTimer *fetchTicker; // 1s heartbeat to animate elapsed time on active fetches
     int currentFetchIndex;
     bool isFetching;
 };

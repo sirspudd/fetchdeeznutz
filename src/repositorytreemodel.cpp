@@ -1,5 +1,6 @@
 #include "repositorytreemodel.h"
 
+#include <QDateTime>
 #include <QFileInfo>
 #include <QMap>
 
@@ -208,9 +209,16 @@ QString RepositoryTreeModel::displayText(const Node* node) const
 
     // Surface transient/failure states inline so a stalled remote is obvious at
     // a glance (it sits on "Fetching..." while siblings move to Success/Error).
+    // For in-flight remotes append a live elapsed counter so a stall reads as a
+    // climbing number rather than a static label.
+    QString statusLabel = remoteStatus;
+    if (remoteStatus == "Fetching..." && remote.fetchStartMs > 0) {
+        const qint64 elapsedS = (QDateTime::currentMSecsSinceEpoch() - remote.fetchStartMs) / 1000;
+        statusLabel = QStringLiteral("Fetching... %1s").arg(elapsedS);
+    }
     QString statusSuffix;
     if (remoteStatus != "Ready" && remoteStatus != "Success") {
-        statusSuffix = QStringLiteral(" - %1").arg(remoteStatus);
+        statusSuffix = QStringLiteral(" - %1").arg(statusLabel);
     }
 
     return QStringLiteral("%1 %2 - %3%4%5").arg(remoteStatusIcon, remote.name, remote.url, delta, statusSuffix);
@@ -314,6 +322,27 @@ void RepositoryTreeModel::updateRemoteCounts(const QString& repoName, const QStr
             }
         }
     }
+}
+
+int RepositoryTreeModel::refreshActiveRemotes()
+{
+    if (!m_repositories) {
+        return 0;
+    }
+    int active = 0;
+    for (const auto& dir : m_root->children) {
+        for (const auto& repoNode : dir->children) {
+            const GitRepository& repo = m_repositories->at(repoNode->repoIndex);
+            for (const auto& remoteNode : repoNode->children) {
+                if (repo.remotes.at(remoteNode->remoteIndex).status == QStringLiteral("Fetching...")) {
+                    ++active;
+                    const QModelIndex idx = indexForNode(remoteNode.get());
+                    emit dataChanged(idx, idx);
+                }
+            }
+        }
+    }
+    return active;
 }
 
 bool RepositoryTreeModel::isRepository(const QModelIndex& index) const
