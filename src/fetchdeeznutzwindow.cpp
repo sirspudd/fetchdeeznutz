@@ -80,6 +80,18 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     if (autoFetchCheckBox->isChecked()) {
         fetchTimer->start(globalIntervalSpinBox->value() * 60000);
     }
+
+    // Show the window on launch unless the user opted to start in the tray.
+    if (!startMinimizedCheckBox->isChecked()) {
+        showWindow();
+    }
+
+    // Fetch immediately on launch rather than waiting a full interval, so the
+    // status is fresh as soon as the app comes up. Deferred to the event loop so
+    // the worker thread and UI are fully ready first.
+    if (autoFetchCheckBox->isChecked()) {
+        QTimer::singleShot(0, this, &FetchDeeznutzWindow::fetchAll);
+    }
 }
 
 FetchDeeznutzWindow::~FetchDeeznutzWindow()
@@ -179,7 +191,12 @@ void FetchDeeznutzWindow::setupUI()
     autoFetchCheckBox = new QCheckBox("Enable Auto Fetch");
     autoFetchCheckBox->setChecked(true);
     connect(autoFetchCheckBox, &QCheckBox::toggled, this, &FetchDeeznutzWindow::onAutoFetchToggled);
-    
+
+    startMinimizedCheckBox = new QCheckBox("Start minimized to tray");
+    startMinimizedCheckBox->setChecked(false);
+    startMinimizedCheckBox->setToolTip("When enabled, the app launches straight to the system tray instead of showing the window.");
+    connect(startMinimizedCheckBox, &QCheckBox::toggled, this, &FetchDeeznutzWindow::saveSettings);
+
     // Initially update the enabled state of interval controls (will be updated again in loadSettings)
     updateAutoFetchControls();
 
@@ -190,6 +207,7 @@ void FetchDeeznutzWindow::setupUI()
     settingsLayout->addRow("Fetch Timeout:", fetchTimeoutSpinBox);
     settingsLayout->addRow("Connection Timeout:", connectionTimeoutSpinBox);
     settingsLayout->addRow("", autoFetchCheckBox);
+    settingsLayout->addRow("", startMinimizedCheckBox);
     settingsLayout->addRow("", fetchAllButton);
 
     leftLayout->addWidget(settingsGroup);
@@ -977,7 +995,10 @@ void FetchDeeznutzWindow::loadSettings()
     // Load auto-fetch enabled state (default: true)
     bool autoFetch = settings.value("autoFetchEnabled", true).toBool();
     autoFetchCheckBox->setChecked(autoFetch);
-    
+
+    // Load start-minimized preference (default: false -> show the window on launch)
+    startMinimizedCheckBox->setChecked(settings.value("startMinimized", false).toBool());
+
     // Update enabled state of interval controls based on auto-fetch setting
     updateAutoFetchControls();
 }
@@ -990,6 +1011,7 @@ void FetchDeeznutzWindow::saveSettings()
     settings.setValue("fetchTimeout", fetchTimeoutSpinBox->value());
     settings.setValue("connectionTimeout", connectionTimeoutSpinBox->value());
     settings.setValue("autoFetchEnabled", autoFetchCheckBox->isChecked());
+    settings.setValue("startMinimized", startMinimizedCheckBox->isChecked());
     
     settings.sync();
 }

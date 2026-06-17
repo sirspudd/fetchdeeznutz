@@ -25,8 +25,8 @@ int main(int argc, char *argv[])
     a.setQuitOnLastWindowClosed(false);
     
     FetchDeeznutzWindow w;
-    // Don't show the window initially - it will be shown via system tray
-    // w.show();
-    
+    // The window manages its own startup visibility: it shows on launch unless
+    // the "Start minimized to tray" setting is enabled.
+
     return a.exec();
 }

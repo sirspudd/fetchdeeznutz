@@ -129,6 +129,7 @@ private:
     QAction *hideAction;
     QAction *quitAction;
     QCheckBox *autoFetchCheckBox;
+    QCheckBox *startMinimizedCheckBox;
 
     QTextEdit *logTextEdit;
 
