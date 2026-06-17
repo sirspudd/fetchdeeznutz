@@ -95,6 +95,7 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
 
 FetchDeeznutzWindow::~FetchDeeznutzWindow()
 {
+    saveSettings(); // persist window geometry (and settings) on quit
     saveRepositories();
     
     // Clean up background thread
@@ -665,6 +666,10 @@ void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, boo
                 repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
             }
             repositoryModel->updateRepositoryStatus(repoName);
+            // The fetch just updated the remote-tracking refs, so the standing
+            // ahead/behind counts are stale (and would also be stale after an
+            // external rebase of the local branch). Recompute them now.
+            calculateCommitCountsAsync(repo);
             break;
         }
     }
@@ -737,6 +742,8 @@ void FetchDeeznutzWindow::quitApplication()
 
 void FetchDeeznutzWindow::closeEvent(QCloseEvent *event)
 {
+    // Persist the current window geometry before hiding to the tray.
+    saveSettings();
     // Hide to system tray instead of closing
     hide();
     event->ignore();
@@ -980,6 +987,12 @@ void FetchDeeznutzWindow::loadSettings()
     // Load start-minimized preference (default: false -> show the window on launch)
     startMinimizedCheckBox->setChecked(settings.value("startMinimized", false).toBool());
 
+    // Restore the saved window geometry (size/position) if present.
+    const QByteArray geometry = settings.value("windowGeometry").toByteArray();
+    if (!geometry.isEmpty()) {
+        restoreGeometry(geometry);
+    }
+
     // Update enabled state of interval controls based on auto-fetch setting
     updateAutoFetchControls();
 }
@@ -993,6 +1006,7 @@ void FetchDeeznutzWindow::saveSettings()
     settings.setValue("connectionTimeout", connectionTimeoutSpinBox->value());
     settings.setValue("autoFetchEnabled", autoFetchCheckBox->isChecked());
     settings.setValue("startMinimized", startMinimizedCheckBox->isChecked());
+    settings.setValue("windowGeometry", saveGeometry());
     
     settings.sync();
 }
