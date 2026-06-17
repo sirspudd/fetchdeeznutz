@@ -21,6 +21,7 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     , fetchTicker(new QTimer(this))
     , fetchThread(new QThread(this))
     , fetchWorker(new GitFetchWorker())
+    , repoWatcher(new RepoWatcher(this))
 {
     // Initialize libgit2 FIRST - before any git operations
     git_libgit2_init();
@@ -57,6 +58,10 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
     connect(fetchWorker, &GitFetchWorker::commitCountsUpdated, this, &FetchDeeznutzWindow::onCommitCountsUpdated);
     connect(fetchWorker, &GitFetchWorker::newTagsFound, this, &FetchDeeznutzWindow::onNewTagsFound);
+
+    // Watch tracked repos for external git changes (commit/checkout/rebase) so
+    // their ahead/behind counts stay live without waiting for a fetch.
+    connect(repoWatcher, &RepoWatcher::repositoryChanged, this, &FetchDeeznutzWindow::onExternalRepositoryChanged);
     fetchThread->start();
     
     // Initial timeout values will be set in loadSettings()
@@ -653,6 +658,16 @@ void FetchDeeznutzWindow::onNewTagsFound(const QString& repoName, const QStringL
     }
 }
 
+void FetchDeeznutzWindow::onExternalRepositoryChanged(const QString& repoName)
+{
+    for (GitRepository& repo : repositories) {
+        if (repo.name == repoName) {
+            calculateCommitCountsAsync(repo);
+            break;
+        }
+    }
+}
+
 void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message)
 {
     logMessage(QString("%1 %2: %3").arg(success ? "✓" : "✗", repoName, message));
@@ -761,6 +776,9 @@ void FetchDeeznutzWindow::updateRepositoryTree()
 
     repositoryModel->rebuild();
     repositoryView->expandAll();
+
+    // Keep the filesystem watcher's targets in sync with the tracked set.
+    repoWatcher->setRepositories(repositories);
 
     if (!selectedName.isEmpty()) {
         const QModelIndex restored = repositoryModel->indexForRepository(selectedName, selectedPath);

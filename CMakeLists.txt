@@ -33,6 +33,8 @@ set(PROJECT_SOURCES
         src/repositorystore.h
         src/repositorytreemodel.cpp
         src/repositorytreemodel.h
+        src/repowatcher.cpp
+        src/repowatcher.h
         src/remoteselectiondialog.cpp
         src/remoteselectiondialog.h
         src/repositorydialog.cpp

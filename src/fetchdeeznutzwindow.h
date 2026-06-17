@@ -8,6 +8,7 @@
 #include "repositorydialog.h"
 #include "repositorystore.h"
 #include "repositorytreemodel.h"
+#include "repowatcher.h"
 
 #include <QMainWindow>
 #include <QTreeView>
@@ -72,6 +73,8 @@ private slots:
     void onCommitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);
     // Shows a persistent tray notification when a fetch brings in new tags.
     void onNewTagsFound(const QString& repoName, const QStringList& tags);
+    // Recomputes a repository's commit counts after an external git change.
+    void onExternalRepositoryChanged(const QString& repoName);
     // Repaints in-flight remotes once per second so their elapsed counter ticks.
     void updateFetchElapsed();
     
@@ -142,6 +145,7 @@ private:
 
     // Data
     RepositoryStore m_store;
+    RepoWatcher *repoWatcher;
     QList<GitRepository> repositories;
     QTimer *fetchTimer;
     QTimer *fetchTicker; // 1s heartbeat to animate elapsed time on active fetches
