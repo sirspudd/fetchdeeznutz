@@ -21,8 +21,6 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     , fetchTicker(new QTimer(this))
     , fetchThread(new QThread(this))
     , fetchWorker(new GitFetchWorker())
-    , currentFetchIndex(-1)
-    , isFetching(false)
 {
     // Initialize libgit2 FIRST - before any git operations
     git_libgit2_init();
@@ -586,36 +584,6 @@ void FetchDeeznutzWindow::performScheduledFetch()
     }
 }
 
-void FetchDeeznutzWindow::onFetchFinished()
-{
-    if (currentFetchIndex >= 0 && currentFetchIndex < repositories.size()) {
-        GitRepository& repo = repositories[currentFetchIndex];
-        repo.status = "Success";
-        repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
-        logMessage(QString("✓ Successfully fetched: %1").arg(repo.name));
-
-        updateRepositoryTree();
-        saveRepositories();
-        currentFetchIndex = -1;
-    }
-
-    isFetching = false;
-}
-
-void FetchDeeznutzWindow::onFetchError(const QString& errorMessage)
-{
-    if (currentFetchIndex >= 0 && currentFetchIndex < repositories.size()) {
-        GitRepository& repo = repositories[currentFetchIndex];
-        repo.status = "Error";
-        logMessage(QString("✗ Error fetching: %1 - %2").arg(repo.name, errorMessage));
-        updateRepositoryTree();
-        saveRepositories();
-        currentFetchIndex = -1;
-    }
-
-    isFetching = false;
-}
-
 void FetchDeeznutzWindow::onBackgroundFetchStarted(const QString& repoName)
 {
     logMessage(QString("Started fetching: %1").arg(repoName));
@@ -674,7 +642,8 @@ void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, boo
 {
     logMessage(QString("%1 %2: %3").arg(success ? "✓" : "✗", repoName, message));
     
-    // Find the repository and update its status
+    // Update the in-memory status / last-fetch time. Neither is persisted, so
+    // there is no need to rewrite the config on fetch completion.
     for (GitRepository& repo : repositories) {
         if (repo.name == repoName) {
             repo.status = success ? "Success" : "Error";
@@ -682,7 +651,6 @@ void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, boo
                 repo.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
             }
             repositoryModel->updateRepositoryStatus(repoName);
-            saveRepositories();
             break;
         }
     }
@@ -692,12 +660,11 @@ void FetchDeeznutzWindow::onBackgroundFetchError(const QString& repoName, const 
 {
     logMessage(QString("✗ Error fetching %1: %2").arg(repoName, errorMessage));
     
-    // Find the repository and update its status
+    // In-memory status only; nothing persistable changed.
     for (GitRepository& repo : repositories) {
         if (repo.name == repoName) {
             repo.status = "Error";
             repositoryModel->updateRepositoryStatus(repoName);
-            saveRepositories();
             break;
         }
     }

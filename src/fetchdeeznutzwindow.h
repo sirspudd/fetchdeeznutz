@@ -64,8 +64,6 @@ private slots:
     void onConnectionTimeoutChanged();
     void onAutoFetchToggled();
     void performScheduledFetch();
-    void onFetchFinished();
-    void onFetchError(const QString& errorMessage);
     void onBackgroundFetchStarted(const QString& repoName);
     void onBackgroundFetchProgress(const QString& repoName, const QString& remoteName, int progress);
     void onRemoteStatusChanged(const QString& repoName, const QString& remoteName, const QString& status);
@@ -145,8 +143,6 @@ private:
     QList<GitRepository> repositories;
     QTimer *fetchTimer;
     QTimer *fetchTicker; // 1s heartbeat to animate elapsed time on active fetches
-    int currentFetchIndex;
-    bool isFetching;
 };
 
 #endif // FETCHDEEZNUTZWINDOW_H
