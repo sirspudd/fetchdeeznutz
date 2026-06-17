@@ -24,6 +24,9 @@ public slots:
 signals:
     void fetchStarted(const QString& repoName);
     void fetchProgress(const QString& repoName, const QString& remoteName, int progress);
+    // Per-remote lifecycle so the UI can show exactly which remote is in flight:
+    // status is one of "Queued", "Fetching...", "Success", "Error", "Timeout".
+    void remoteStatusChanged(const QString& repoName, const QString& remoteName, const QString& status);
     void fetchFinished(const QString& repoName, bool success, const QString& message);
     void fetchError(const QString& repoName, const QString& errorMessage);
     void commitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);

@@ -53,6 +53,7 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     connect(fetchThread, &QThread::finished, fetchWorker, &GitFetchWorker::deleteLater);
     connect(fetchWorker, &GitFetchWorker::fetchStarted, this, &FetchDeeznutzWindow::onBackgroundFetchStarted);
     connect(fetchWorker, &GitFetchWorker::fetchProgress, this, &FetchDeeznutzWindow::onBackgroundFetchProgress);
+    connect(fetchWorker, &GitFetchWorker::remoteStatusChanged, this, &FetchDeeznutzWindow::onRemoteStatusChanged);
     connect(fetchWorker, &GitFetchWorker::fetchFinished, this, &FetchDeeznutzWindow::onBackgroundFetchFinished);
     connect(fetchWorker, &GitFetchWorker::fetchError, this, &FetchDeeznutzWindow::onBackgroundFetchError);
     connect(fetchWorker, &GitFetchWorker::commitCountsUpdated, this, &FetchDeeznutzWindow::onCommitCountsUpdated);
@@ -611,6 +612,26 @@ void FetchDeeznutzWindow::onBackgroundFetchProgress(const QString& repoName, con
     Q_UNUSED(repoName);
     Q_UNUSED(remoteName);
     Q_UNUSED(progress);
+}
+
+void FetchDeeznutzWindow::onRemoteStatusChanged(const QString& repoName, const QString& remoteName, const QString& status)
+{
+    for (GitRepository& repo : repositories) {
+        if (repo.name != repoName) {
+            continue;
+        }
+        for (GitRemote& remote : repo.remotes) {
+            if (remote.name == remoteName) {
+                remote.status = status;
+                if (status == "Success") {
+                    remote.lastFetch = QDateTime::currentDateTime().toString(Qt::ISODate);
+                }
+                repositoryModel->updateRemoteCounts(repoName, remoteName);
+                break;
+            }
+        }
+        break;
+    }
 }
 
 void FetchDeeznutzWindow::onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message)

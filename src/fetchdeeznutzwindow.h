@@ -68,6 +68,7 @@ private slots:
     void onFetchError(const QString& errorMessage);
     void onBackgroundFetchStarted(const QString& repoName);
     void onBackgroundFetchProgress(const QString& repoName, const QString& remoteName, int progress);
+    void onRemoteStatusChanged(const QString& repoName, const QString& remoteName, const QString& status);
     void onBackgroundFetchFinished(const QString& repoName, bool success, const QString& message);
     void onBackgroundFetchError(const QString& repoName, const QString& errorMessage);
     void onCommitCountsUpdated(const QString& repoName, const QString& remoteName, int commitsAhead, int commitsBehind);

@@ -119,6 +119,11 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
     int totalRemotes = repo.remotes.size();
     int completedRemotes = 0;
 
+    // Mark every remote as queued up front so the UI shows what's pending.
+    for (const GitRemote& remote : repo.remotes) {
+        emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Queued"));
+    }
+
     // Fetch from all remotes
     for (const GitRemote& remote : repo.remotes) {
         if (payload.shouldAbort()) {
@@ -135,6 +140,9 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
         }
 
         emit fetchProgress(repo.name, remote.name, (completedRemotes * 100) / totalRemotes);
+        // Flag this remote as in-flight *before* the blocking fetch so a stalled
+        // remote stays visibly on "Fetching..." while its siblings move on.
+        emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Fetching..."));
 
         git_remote *git_remote = nullptr;
         {
@@ -146,6 +154,7 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
             }
         }
         if (error < 0) {
+            emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Error"));
             failedRemotes.append(remote.name);
             allSuccessful = false;
             completedRemotes++;
@@ -176,13 +185,18 @@ void GitFetchWorker::performFetch(const GitRepository& repo)
 
         if (error < 0) {
             if (std::chrono::steady_clock::now() >= payload.deadline) {
+                emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Timeout"));
                 failedRemotes.append(remote.name + " (timed out)");
             } else if (error == GIT_EUSER || m_stopRequested.load()) {
+                emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Cancelled"));
                 failedRemotes.append(remote.name + " (cancelled)");
             } else {
+                emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Error"));
                 failedRemotes.append(remote.name);
             }
             allSuccessful = false;
+        } else {
+            emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Success"));
         }
 
         {

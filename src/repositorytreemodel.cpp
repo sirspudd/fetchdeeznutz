@@ -187,6 +187,12 @@ QString RepositoryTreeModel::displayText(const Node* node) const
         remoteStatusIcon = QStringLiteral("\u2705");
     } else if (remoteStatus == "Fetching...") {
         remoteStatusIcon = QStringLiteral("\U0001F504");
+    } else if (remoteStatus == "Timeout") {
+        remoteStatusIcon = QStringLiteral("\u23F0");
+    } else if (remoteStatus == "Queued") {
+        remoteStatusIcon = QStringLiteral("\u23F3");
+    } else if (remoteStatus == "Cancelled") {
+        remoteStatusIcon = QStringLiteral("\u26A0");
     }
 
     QString delta;
@@ -200,7 +206,14 @@ QString RepositoryTreeModel::displayText(const Node* node) const
         delta = QStringLiteral(" [up-to-date]");
     }
 
-    return QStringLiteral("%1 %2 - %3%4").arg(remoteStatusIcon, remote.name, remote.url, delta);
+    // Surface transient/failure states inline so a stalled remote is obvious at
+    // a glance (it sits on "Fetching..." while siblings move to Success/Error).
+    QString statusSuffix;
+    if (remoteStatus != "Ready" && remoteStatus != "Success") {
+        statusSuffix = QStringLiteral(" - %1").arg(remoteStatus);
+    }
+
+    return QStringLiteral("%1 %2 - %3%4%5").arg(remoteStatusIcon, remote.name, remote.url, delta, statusSuffix);
 }
 
 QString RepositoryTreeModel::toolTip(const Node* node) const
