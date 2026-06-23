@@ -56,10 +56,10 @@ Directional Arrows: Clear representation of fetch operations
 Repository Dots: Visual status indicators
 Subtle Shadows: Depth and professionalism
 �� Files Created:
-fetchdeeznuts_logo_v3.svg: The final professional logo
+fetchdeeznutz_logo_v3.svg: The final professional logo
 nuts_icon.svg: Updated with the new design
 PNG Icons: All standard sizes (16x16 to 256x256)
-Alternative Versions: fetchdeeznuts_logo.svg and fetchdeeznuts_logo_v2.svg for comparison
+Alternative Versions: fetchdeeznutz_logo.svg and fetchdeeznutz_logo_v2.svg for comparison
 🔧 Integration:
 Application Integration:
 System Tray: Uses the new professional logo
@@ -197,9 +197,9 @@ The right panel shows a real-time log of all operations, including:
 ## Configuration
 
 The application stores its configuration in a JSON file located at:
-- Linux: `~/.config/fetchdeeznuts/repositories.json`
-- Windows: `%APPDATA%/fetchdeeznuts/repositories.json`
-- macOS: `~/Library/Preferences/fetchdeeznuts/repositories.json`
+- Linux: `~/.config/fetchdeeznutz/repositories.json`
+- Windows: `%APPDATA%/fetchdeeznutz/repositories.json`
+- macOS: `~/Library/Preferences/fetchdeeznutz/repositories.json`
 
 ## How It Works
 

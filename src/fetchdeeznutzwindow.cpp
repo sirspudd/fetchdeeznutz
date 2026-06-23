@@ -268,7 +268,7 @@ void FetchDeeznutzWindow::setupSystemTray()
     trayIcon = new QSystemTrayIcon(this);
     
     // Set custom nuts icon (themed when installed, bundled resource otherwise)
-    trayIcon->setIcon(QIcon::fromTheme(QStringLiteral("fetchdeeznuts"), QIcon(QStringLiteral(":/nuts_icon.svg"))));
+    trayIcon->setIcon(QIcon::fromTheme(QStringLiteral("fetchdeeznutz"), QIcon(QStringLiteral(":/nuts_icon.svg"))));
     
     // Create tray menu
     trayMenu = new QMenu(this);

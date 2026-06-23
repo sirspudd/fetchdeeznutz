@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(fetchdeeznuts VERSION 0.1 LANGUAGES CXX)
+project(fetchdeeznutz VERSION 0.1 LANGUAGES CXX)
 
 # Set default build type to Release if not specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -45,40 +45,40 @@ set(PROJECT_SOURCES
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
-    qt_add_executable(fetchdeeznuts
+    qt_add_executable(fetchdeeznutz
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
     )
 # Define target properties for Android with Qt 6 as:
-#    set_property(TARGET fetchdeeznuts APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
+#    set_property(TARGET fetchdeeznutz APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
 #                 ${CMAKE_CURRENT_SOURCE_DIR}/android)
 # For more information, see https://doc.qt.io/qt-6/qt-add-executable.html#target-creation
 else()
     if(ANDROID)
-        add_library(fetchdeeznuts SHARED
+        add_library(fetchdeeznutz SHARED
             ${PROJECT_SOURCES}
         )
 # Define properties for Android with Qt 5 after find_package() calls as:
 #    set(ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
     else()
-        add_executable(fetchdeeznuts
+        add_executable(fetchdeeznutz
             ${PROJECT_SOURCES}
         )
     endif()
 endif()
 
-target_link_libraries(fetchdeeznuts PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
-target_include_directories(fetchdeeznuts PRIVATE ${LIBGIT2_INCLUDE_DIRS})
-target_link_libraries(fetchdeeznuts PRIVATE ${LIBGIT2_LIBRARIES})
-target_compile_options(fetchdeeznuts PRIVATE ${LIBGIT2_CFLAGS_OTHER})
+target_link_libraries(fetchdeeznutz PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
+target_include_directories(fetchdeeznutz PRIVATE ${LIBGIT2_INCLUDE_DIRS})
+target_link_libraries(fetchdeeznutz PRIVATE ${LIBGIT2_LIBRARIES})
+target_compile_options(fetchdeeznutz PRIVATE ${LIBGIT2_CFLAGS_OTHER})
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an
 # explicit, fixed bundle identifier manually though.
 if(${QT_VERSION} VERSION_LESS 6.1.0)
-  set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.fetchdeeznuts)
+  set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.fetchdeeznutz)
 endif()
-set_target_properties(fetchdeeznuts PROPERTIES
+set_target_properties(fetchdeeznutz PROPERTIES
     ${BUNDLE_ID_OPTION}
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
@@ -93,24 +93,24 @@ include(GNUInstallDirs)
 #if(IMAGEMAGICK_CONVERT)
 #    # Create PNG icons from SVG
 #    add_custom_target(generate_icons
-#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 16x16 fetchdeeznuts-16.png
-#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 24x24 fetchdeeznuts-24.png
-#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 32x32 fetchdeeznuts-32.png
-#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 48x48 fetchdeeznuts-48.png
-#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 64x64 fetchdeeznuts-64.png
-#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 128x128 fetchdeeznuts-128.png
-#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 256x256 fetchdeeznuts-256.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 16x16 fetchdeeznutz-16.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 24x24 fetchdeeznutz-24.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 32x32 fetchdeeznutz-32.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 48x48 fetchdeeznutz-48.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 64x64 fetchdeeznutz-64.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 128x128 fetchdeeznutz-128.png
+#        COMMAND ${IMAGEMAGICK_CONVERT} nuts_icon.svg -resize 256x256 fetchdeeznutz-256.png
 #        DEPENDS nuts_icon.svg
 #        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 #        COMMENT "Generating PNG icons from SVG"
 #    )
-#    add_dependencies(fetchdeeznuts generate_icons)
+#    add_dependencies(fetchdeeznutz generate_icons)
 #else()
 #    message(STATUS "ImageMagick not found - PNG icons will not be generated")
 #endif()
 
 # Install the executable
-install(TARGETS fetchdeeznuts
+install(TARGETS fetchdeeznutz
     BUNDLE DESTINATION .
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -135,7 +135,7 @@ install(CODE "
         else()
             set(INSTALL_ROOT \"\${CMAKE_INSTALL_PREFIX}\")
         endif()
-        set(BINARY_PATH \"\${INSTALL_ROOT}/${CMAKE_INSTALL_BINDIR}/fetchdeeznuts\")
+        set(BINARY_PATH \"\${INSTALL_ROOT}/${CMAKE_INSTALL_BINDIR}/fetchdeeznutz\")
         message(STATUS \"Checking for binary at: \${BINARY_PATH}\")
         if(EXISTS \"\${BINARY_PATH}\")
             message(STATUS \"Stripping \${BINARY_PATH}\")
@@ -172,67 +172,67 @@ install(CODE "
 ")
 
 # Install desktop file
-install(FILES resources/fetchdeeznuts-install.desktop
+install(FILES resources/fetchdeeznutz-install.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
-    RENAME fetchdeeznuts.desktop
+    RENAME fetchdeeznutz.desktop
 )
 
 # Install icons
 install(FILES resources/nuts_icon.svg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
-    RENAME fetchdeeznuts.svg
+    RENAME fetchdeeznutz.svg
 )
 
 # Install PNG icons if they exist
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-16.png)
-    install(FILES resources/fetchdeeznuts-16.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznutz-16.png)
+    install(FILES resources/fetchdeeznutz-16.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps
-        RENAME fetchdeeznuts.png
+        RENAME fetchdeeznutz.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-24.png)
-    install(FILES resources/fetchdeeznuts-24.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznutz-24.png)
+    install(FILES resources/fetchdeeznutz-24.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/24x24/apps
-        RENAME fetchdeeznuts.png
+        RENAME fetchdeeznutz.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-32.png)
-    install(FILES resources/fetchdeeznuts-32.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznutz-32.png)
+    install(FILES resources/fetchdeeznutz-32.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps
-        RENAME fetchdeeznuts.png
+        RENAME fetchdeeznutz.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-48.png)
-    install(FILES resources/fetchdeeznuts-48.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznutz-48.png)
+    install(FILES resources/fetchdeeznutz-48.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48/apps
-        RENAME fetchdeeznuts.png
+        RENAME fetchdeeznutz.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-64.png)
-    install(FILES resources/fetchdeeznuts-64.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznutz-64.png)
+    install(FILES resources/fetchdeeznutz-64.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps
-        RENAME fetchdeeznuts.png
+        RENAME fetchdeeznutz.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-128.png)
-    install(FILES resources/fetchdeeznuts-128.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznutz-128.png)
+    install(FILES resources/fetchdeeznutz-128.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps
-        RENAME fetchdeeznuts.png
+        RENAME fetchdeeznutz.png
     )
 endif()
 
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznuts-256.png)
-    install(FILES resources/fetchdeeznuts-256.png
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources/fetchdeeznutz-256.png)
+    install(FILES resources/fetchdeeznutz-256.png
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
-        RENAME fetchdeeznuts.png
+        RENAME fetchdeeznutz.png
     )
 endif()
 
 if(QT_VERSION_MAJOR EQUAL 6)
-    qt_finalize_executable(fetchdeeznuts)
+    qt_finalize_executable(fetchdeeznutz)
 endif()

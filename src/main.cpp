@@ -18,12 +18,12 @@ int main(int argc, char *argv[])
     // Link the running app to its installed .desktop entry. On Wayland this sets
     // the surface app_id, which is how the compositor/KDE maps the window to the
     // installed launcher and its icon; it must match the installed file name
-    // (fetchdeeznuts.desktop).
-    a.setDesktopFileName(QStringLiteral("fetchdeeznuts"));
+    // (fetchdeeznutz.desktop).
+    a.setDesktopFileName(QStringLiteral("fetchdeeznutz"));
 
     // Window/taskbar icon: prefer the installed themed icon, falling back to the
     // bundled resource when running uninstalled (e.g. straight from the build dir).
-    a.setWindowIcon(QIcon::fromTheme(QStringLiteral("fetchdeeznuts"), QIcon(QStringLiteral(":/nuts_icon.svg"))));
+    a.setWindowIcon(QIcon::fromTheme(QStringLiteral("fetchdeeznutz"), QIcon(QStringLiteral(":/nuts_icon.svg"))));
     
     // Check if system tray is available
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
