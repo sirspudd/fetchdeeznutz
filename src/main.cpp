@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QSystemTrayIcon>
 #include <QMessageBox>
+#include <QIcon>
 #include <git2.h>
 
 int main(int argc, char *argv[])
@@ -13,6 +14,16 @@ int main(int argc, char *argv[])
     a.setApplicationName("FetchDeezNutz");
     a.setApplicationVersion("1.0");
     a.setOrganizationName("FetchDeezNutz");
+
+    // Link the running app to its installed .desktop entry. On Wayland this sets
+    // the surface app_id, which is how the compositor/KDE maps the window to the
+    // installed launcher and its icon; it must match the installed file name
+    // (fetchdeeznuts.desktop).
+    a.setDesktopFileName(QStringLiteral("fetchdeeznuts"));
+
+    // Window/taskbar icon: prefer the installed themed icon, falling back to the
+    // bundled resource when running uninstalled (e.g. straight from the build dir).
+    a.setWindowIcon(QIcon::fromTheme(QStringLiteral("fetchdeeznuts"), QIcon(QStringLiteral(":/nuts_icon.svg"))));
     
     // Check if system tray is available
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
