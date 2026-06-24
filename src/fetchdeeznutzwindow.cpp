@@ -13,7 +13,6 @@
 #include <QtConcurrent>
 #include <QScrollBar>
 #include <QItemSelectionModel>
-#include <git2.h>
 
 FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -23,16 +22,6 @@ FetchDeeznutzWindow::FetchDeeznutzWindow(QWidget *parent)
     , fetchWorker(new GitFetchWorker())
     , repoWatcher(new RepoWatcher(this))
 {
-    // Initialize libgit2 FIRST - before any git operations
-    git_libgit2_init();
-
-    // Concurrent fetches rely on libgit2 being thread-safe across independent
-    // repository handles, which requires it to be built with thread support.
-    if (!(git_libgit2_features() & GIT_FEATURE_THREADS)) {
-        qWarning() << "libgit2 was built without thread support; concurrent git "
-                      "operations may be unsafe.";
-    }
-    
     setWindowTitle("Git Repository Fetcher");
     setMinimumSize(800, 600);
 
@@ -109,8 +98,6 @@ FetchDeeznutzWindow::~FetchDeeznutzWindow()
     }
     fetchThread->quit();
     fetchThread->wait();
-    
-    git_libgit2_shutdown();
 }
 
 void FetchDeeznutzWindow::setupUI()
@@ -858,24 +845,10 @@ void FetchDeeznutzWindow::calculateCommitCounts(GitRepository& repo)
         return;
     }
 
-    git_repository *repository = nullptr;
-    int error;
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_repository_open(&repository, repo.localPath.toLocal8Bit().constData());
-    }
-    if (error < 0) {
-        return;
-    }
-
     for (GitRemote& remote : repo.remotes) {
-        GitUtils::calculateRemoteCommitCounts(repository, remote, repo.branch, repo.name);
+        GitUtils::calculateRemoteCommitCounts(repo.localPath, remote, repo.branch, repo.name);
     }
 
-    {
-        QMutexLocker locker(&g_gitMutex);
-        git_repository_free(repository);
-    }
     updateRepositoryTree();
 }
 
@@ -901,20 +874,10 @@ void FetchDeeznutzWindow::calculateCommitCountsAsync(const GitRepository& repo)
             return;
         }
 
-        git_repository *repository = nullptr;
-        int error;
-        {
-            QMutexLocker locker(&g_gitMutex);
-            error = git_repository_open(&repository, repoPath.toLocal8Bit().constData());
-        }
-        if (error < 0) {
-            return;
-        }
-
         for (const QString& remoteName : remoteNames) {
             GitRemote remote;
             remote.name = remoteName;
-            GitUtils::calculateRemoteCommitCounts(repository, remote, branch, repoName);
+            GitUtils::calculateRemoteCommitCounts(repoPath, remote, branch, repoName);
 
             const int ahead = remote.commitsAhead;
             const int behind = remote.commitsBehind;
@@ -922,11 +885,6 @@ void FetchDeeznutzWindow::calculateCommitCountsAsync(const GitRepository& repo)
             QMetaObject::invokeMethod(this, [this, repoName, remoteName, ahead, behind]() {
                 onCommitCountsUpdated(repoName, remoteName, ahead, behind);
             }, Qt::QueuedConnection);
-        }
-
-        {
-            QMutexLocker locker(&g_gitMutex);
-            git_repository_free(repository);
         }
     });
 }

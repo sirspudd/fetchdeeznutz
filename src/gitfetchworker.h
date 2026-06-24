@@ -4,7 +4,6 @@
 #include "gitmodels.h"
 #include <QObject>
 #include <QThreadPool>
-#include <git2.h>
 #include <atomic>
 #include <chrono>
 
@@ -36,22 +35,21 @@ signals:
     void newTagsFound(const QString& repoName, const QStringList& tags);
 
 private:
-    // Fetch a single remote using its own repository handle (libgit2 handles are
-    // not shareable across threads). Emits the "Fetching..." transition; returns
-    // true on success and writes the resulting status label ("Success", "Error",
-    // "Timeout", "Cancelled").
+    // Fetch a single remote by shelling out to `git fetch`. The child process is
+    // killed if the overall deadline is exceeded, if it produces no output for
+    // longer than the idle timeout (stall detection), or if a stop is requested.
+    // Emits the "Fetching..." transition; returns true on success and writes the
+    // resulting status label ("Success", "Error", "Timeout", "Cancelled").
     bool fetchOneRemote(const QString& repoName, const QString& repoPath, const GitRemote& remote,
                         std::chrono::steady_clock::time_point deadline, QString& statusLabel);
     // Diff the repository's current tags against the pre-fetch snapshot and emit
     // newTagsFound for any that appeared.
     void checkForNewTags(const QString& repoName, const QString& repoPath, const QStringList& tagsBefore);
-    QString getGitErrorMessage(int error) const;
-    int sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload);
 
     QThreadPool m_pool; // bounded pool so independent remote fetches run concurrently
     std::atomic<bool> m_stopRequested;
     std::atomic<int> m_timeoutSeconds;
-    std::atomic<int> m_connectionTimeoutSeconds;
+    std::atomic<int> m_connectionTimeoutSeconds; // doubles as the no-output (stall) timeout
 };
 
 #endif // GITFETCHWORKER_H

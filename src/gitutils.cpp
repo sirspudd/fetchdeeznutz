@@ -1,34 +1,55 @@
 #include "gitutils.h"
-#include <git2.h>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QRegularExpression>
 #include <QTextStream>
 #include <QDebug>
-#include <QMutexLocker>
-
-// Global mutex to serialize all libgit2 operations
-QMutex g_gitMutex;
 
 namespace GitUtils {
 
+GitResult runGit(const QString& workingDir, const QStringList& args, int timeoutMs) {
+    GitResult result;
+
+    QStringList fullArgs;
+    if (!workingDir.isEmpty()) {
+        fullArgs << QStringLiteral("-C") << workingDir;
+    }
+    fullArgs += args;
+
+    QProcess proc;
+    // Inherit the user's environment (PATH, HOME, SSH_AUTH_SOCK, ...) so git
+    // behaves exactly like an interactive invocation, then layer on overrides
+    // that guarantee it can never block on a prompt.
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
+    proc.setProcessEnvironment(env);
+
+    proc.start(QStringLiteral("git"), fullArgs);
+    if (!proc.waitForStarted(5000)) {
+        result.exitCode = GIT_PROCESS_FAILED_TO_START;
+        result.stdErr = QStringLiteral("Failed to start git (is it installed and on PATH?)");
+        return result;
+    }
+
+    if (!proc.waitForFinished(timeoutMs > 0 ? timeoutMs : -1)) {
+        proc.kill();
+        proc.waitForFinished(2000);
+        result.exitCode = GIT_PROCESS_TIMED_OUT;
+        result.stdErr = QStringLiteral("git timed out");
+        return result;
+    }
+
+    result.stdOut = QString::fromUtf8(proc.readAllStandardOutput());
+    result.stdErr = QString::fromUtf8(proc.readAllStandardError());
+    result.exitCode = (proc.exitStatus() == QProcess::NormalExit) ? proc.exitCode() : GIT_PROCESS_FAILED_TO_START;
+    return result;
+}
+
 bool isRepositoryValid(const QString& path) {
-    git_repository *repository = nullptr;
-    int error;
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_repository_open(&repository, path.toLocal8Bit().constData());
-    }
-
-    if (error < 0) {
-        return false;
-    }
-
-    {
-        QMutexLocker locker(&g_gitMutex);
-        git_repository_free(repository);
-    }
-    return true;
+    return isGitRepository(path) || isGitWorktree(path);
 }
 
 bool isGitRepository(const QString& path) {
@@ -178,462 +199,150 @@ QString getRepositoryName(const QString& path) {
 QList<GitRemote> getRepositoryRemotes(const QString& path) {
     QList<GitRemote> remotes;
 
-    git_repository *repository = nullptr;
-    int error;
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_repository_open(&repository, path.toLocal8Bit().constData());
-    }
-
-    if (error < 0) {
+    const GitResult listed = runGit(path, {QStringLiteral("remote")}, 10000);
+    if (!listed.ok()) {
         return remotes;
     }
 
-    git_strarray remote_names = {0};
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_remote_list(&remote_names, repository);
-    }
-
-    if (error >= 0) {
-        for (size_t i = 0; i < remote_names.count; ++i) {
-            git_remote *remote = nullptr;
-            {
-                QMutexLocker locker(&g_gitMutex);
-                error = git_remote_lookup(&remote, repository, remote_names.strings[i]);
-            }
-
-            if (error >= 0) {
-                GitRemote gitRemote;
-                gitRemote.name = QString::fromUtf8(remote_names.strings[i]);
-
-                const char *remote_url = nullptr;
-                {
-                    QMutexLocker locker(&g_gitMutex);
-                    remote_url = git_remote_url(remote);
-                }
-                if (remote_url) {
-                    gitRemote.url = QString::fromUtf8(remote_url);
-                    gitRemote.status = "Ready";
-                    remotes.append(gitRemote);
-                }
-
-                {
-                    QMutexLocker locker(&g_gitMutex);
-                    git_remote_free(remote);
-                }
-            }
+    const QStringList names = listed.stdOut.split('\n', Qt::SkipEmptyParts);
+    for (const QString& rawName : names) {
+        const QString name = rawName.trimmed();
+        if (name.isEmpty()) {
+            continue;
         }
 
-        git_strarray_free(&remote_names);
+        const GitResult url = runGit(path, {QStringLiteral("remote"), QStringLiteral("get-url"), name}, 10000);
+        if (!url.ok()) {
+            continue;
+        }
+
+        GitRemote gitRemote;
+        gitRemote.name = name;
+        gitRemote.url = url.stdOut.trimmed();
+        gitRemote.status = QStringLiteral("Ready");
+        if (!gitRemote.url.isEmpty()) {
+            remotes.append(gitRemote);
+        }
     }
 
-    {
-        QMutexLocker locker(&g_gitMutex);
-        git_repository_free(repository);
-    }
     return remotes;
 }
 
 QString getRepositoryBranch(const QString& path) {
-    git_repository *repository = nullptr;
-    int error;
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_repository_open(&repository, path.toLocal8Bit().constData());
-    }
-
-    if (error < 0) {
-        return "main"; // Default branch
-    }
-
-    git_reference *head = nullptr;
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_repository_head(&head, repository);
-    }
-
-    QString branch = "main"; // Default
-    if (error >= 0) {
-        const char *branch_name = nullptr;
-        {
-            QMutexLocker locker(&g_gitMutex);
-            branch_name = git_reference_shorthand(head);
-        }
-        if (branch_name) {
-            branch = QString::fromUtf8(branch_name);
-        }
-        {
-            QMutexLocker locker(&g_gitMutex);
-            git_reference_free(head);
+    const GitResult res = runGit(path, {QStringLiteral("rev-parse"), QStringLiteral("--abbrev-ref"), QStringLiteral("HEAD")}, 10000);
+    if (res.ok()) {
+        const QString branch = res.stdOut.trimmed();
+        if (!branch.isEmpty() && branch != QStringLiteral("HEAD")) {
+            return branch;
         }
     }
-
-    {
-        QMutexLocker locker(&g_gitMutex);
-        git_repository_free(repository);
-    }
-    return branch;
+    return QStringLiteral("main"); // Default / detached HEAD
 }
 
-void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName) {
+void calculateRemoteCommitCounts(const QString& repoPath, GitRemote& remote, const QString& branch, const QString& repoName) {
     Q_UNUSED(repoName);
-    QMutexLocker locker(&g_gitMutex);
-    
-    // Get the local branch reference
-    QString localBranchRef = QString("refs/heads/%1").arg(branch);
-    git_reference *localBranch = nullptr;
-    int error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
 
-    if (error < 0) {
-        // Local branch doesn't exist, try HEAD
-        error = git_repository_head(&localBranch, repository);
-        if (error < 0) {
-            remote.commitsAhead = 0;
-            remote.commitsBehind = 0;
-            return;
+    remote.commitsAhead = 0;
+    remote.commitsBehind = 0;
+
+    // Resolve the local branch ref; fall back to HEAD if the named branch
+    // doesn't exist locally.
+    QString localRef = QStringLiteral("refs/heads/%1").arg(branch);
+    if (!runGit(repoPath, {QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("--quiet"), localRef}, 10000).ok()) {
+        localRef = QStringLiteral("HEAD");
+    }
+
+    // Determine which remote-tracking ref to compare against.
+    //  1. Prefer the configured upstream, but only if it belongs to THIS remote
+    //     (comparing against an unrelated remote produces misleading counts).
+    //  2. Otherwise use the same-named branch on this remote, if present.
+    //  3. Otherwise there's nothing meaningful to compare -> 0/0.
+    QString remoteRef;
+    const GitResult upstream = runGit(repoPath,
+        {QStringLiteral("rev-parse"), QStringLiteral("--abbrev-ref"), QStringLiteral("--symbolic-full-name"),
+         QStringLiteral("%1@{upstream}").arg(branch)}, 10000);
+    if (upstream.ok()) {
+        const QString up = upstream.stdOut.trimmed();
+        if (up.startsWith(remote.name + QStringLiteral("/"))) {
+            remoteRef = QStringLiteral("refs/remotes/%1").arg(up);
         }
     }
 
-    // Try to get the upstream tracking branch first (this is the most accurate)
-    git_reference *remoteBranch = nullptr;
-    git_reference *upstream = nullptr;
-    
-    // Check if this is a branch reference (not just any reference)
-    if (git_reference_is_branch(localBranch)) {
-        error = git_branch_upstream(&upstream, localBranch);
-        
-        if (error == 0 && upstream) {
-            // Get the upstream reference name and check if it belongs to the remote we're checking
-            const char *upstreamRefName = git_reference_name(upstream);
-            if (upstreamRefName) {
-                QString upstreamRefStr = QString::fromUtf8(upstreamRefName);
-                // Upstream ref format is "refs/remotes/remote/branch" (e.g., "refs/remotes/origin/master")
-                QString expectedPrefix = QString("refs/remotes/%1/").arg(remote.name);
-                if (upstreamRefStr.startsWith(expectedPrefix)) {
-                    remoteBranch = upstream;
-                    upstream = nullptr; // Don't free it, we're using it
-                } else {
-                    git_reference_free(upstream);
-                    upstream = nullptr;
-                }
-            } else {
-                git_reference_free(upstream);
-                upstream = nullptr;
-            }
-        }
-    }
-    
-    // If there's no upstream tracking branch for this remote, look for the
-    // remote-tracking ref of the *same* branch name. We deliberately do NOT
-    // fall back to guessing main/master/develop: comparing the local branch
-    // against an unrelated remote branch produces misleading ahead/behind
-    // counts. If there's no corresponding remote branch, there's nothing
-    // meaningful to compare, so report 0/0.
-    if (!remoteBranch) {
-        QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remote.name, branch);
-        error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
-
-        if (error < 0) {
-            git_reference_free(localBranch);
-            remote.commitsAhead = 0;
-            remote.commitsBehind = 0;
-            return;
+    if (remoteRef.isEmpty()) {
+        const QString candidate = QStringLiteral("refs/remotes/%1/%2").arg(remote.name, branch);
+        if (runGit(repoPath, {QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("--quiet"), candidate}, 10000).ok()) {
+            remoteRef = candidate;
         }
     }
 
-    // Get the commits
-    git_commit *localCommit = nullptr;
-    git_commit *remoteCommit = nullptr;
+    if (remoteRef.isEmpty()) {
+        return; // no corresponding remote branch
+    }
 
-    error = git_commit_lookup(&localCommit, repository, git_reference_target(localBranch));
-    if (error < 0) {
-        git_reference_free(localBranch);
-        git_reference_free(remoteBranch);
-        remote.commitsAhead = 0;
-        remote.commitsBehind = 0;
+    // `git rev-list --left-right --count A...B` prints "<ahead> <behind>" where
+    // ahead = commits in A not B and behind = commits in B not A.
+    const GitResult counts = runGit(repoPath,
+        {QStringLiteral("rev-list"), QStringLiteral("--left-right"), QStringLiteral("--count"),
+         QStringLiteral("%1...%2").arg(localRef, remoteRef)}, 15000);
+    if (!counts.ok()) {
         return;
     }
 
-    error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
-    if (error < 0) {
-        git_commit_free(localCommit);
-        git_reference_free(localBranch);
-        git_reference_free(remoteBranch);
-        remote.commitsAhead = 0;
-        remote.commitsBehind = 0;
-        return;
+    const QStringList parts = counts.stdOut.trimmed().split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    if (parts.size() == 2) {
+        remote.commitsAhead = parts[0].toInt();
+        remote.commitsBehind = parts[1].toInt();
     }
-
-    // Check if commits are the same
-    if (git_oid_equal(git_commit_id(localCommit), git_commit_id(remoteCommit))) {
-        remote.commitsAhead = 0;
-        remote.commitsBehind = 0;
-        git_commit_free(localCommit);
-        git_commit_free(remoteCommit);
-        git_reference_free(localBranch);
-        git_reference_free(remoteBranch);
-        return;
-    }
-
-    // Calculate ahead/behind counts using a more reliable method
-    git_revwalk *walk = nullptr;
-    error = git_revwalk_new(&walk, repository);
-    if (error < 0) {
-        git_commit_free(localCommit);
-        git_commit_free(remoteCommit);
-        git_reference_free(localBranch);
-        git_reference_free(remoteBranch);
-        remote.commitsAhead = 0;
-        remote.commitsBehind = 0;
-        return;
-    }
-
-    git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL | GIT_SORT_TIME);
-
-    // Count commits ahead (in local but not in remote)
-    git_revwalk_reset(walk);
-    git_revwalk_push(walk, git_commit_id(localCommit));
-    git_revwalk_hide(walk, git_commit_id(remoteCommit));
-
-    int ahead = 0;
-    git_oid oid;
-    while (git_revwalk_next(&oid, walk) == 0) {
-        ahead++;
-    }
-
-    // Count commits behind (in remote but not in local)
-    git_revwalk_reset(walk);
-    git_revwalk_push(walk, git_commit_id(remoteCommit));
-    git_revwalk_hide(walk, git_commit_id(localCommit));
-
-    int behind = 0;
-    while (git_revwalk_next(&oid, walk) == 0) {
-        behind++;
-    }
-
-    remote.commitsAhead = ahead;
-    remote.commitsBehind = behind;
-
-    git_revwalk_free(walk);
-    git_commit_free(localCommit);
-    git_commit_free(remoteCommit);
-    git_reference_free(localBranch);
-    git_reference_free(remoteBranch);
-}
-
-QString getGitErrorMessage(int error) {
-    if (error == GIT_ETIMEOUT) {
-        return QString("Connection timeout");
-    }
-    
-    const git_error *gitError = git_error_last();
-    if (gitError && gitError->message) {
-        return QString::fromUtf8(gitError->message);
-    }
-    
-    return QString("Unknown error: %1").arg(error);
-}
-
-int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds) {
-    Q_UNUSED(timeoutSeconds); // timeouts are enforced via fetch callbacks + libgit2 server-timeout opts
-    // Deliberately NOT holding g_gitMutex here: the network fetch can block for
-    // a long time, and the supplied git_remote/git_repository handles are owned
-    // exclusively by the calling fetch. Holding the global lock during fetch
-    // would serialize all fetches and let one hung remote freeze every other
-    // git operation in the app. libgit2 is thread-safe across independent
-    // handles when built with GIT_FEATURE_THREADS.
-    return git_remote_fetch(git_remote, nullptr, &fetch_opts, nullptr);
 }
 
 QStringList listTags(const QString& repoPath) {
-    QMutexLocker locker(&g_gitMutex);
-
-    git_repository *repository = nullptr;
-    if (git_repository_open(&repository, repoPath.toLocal8Bit().constData()) < 0) {
+    const GitResult res = runGit(repoPath, {QStringLiteral("tag")}, 15000);
+    if (!res.ok()) {
         return {};
     }
-
-    git_strarray tags = {nullptr, 0};
-    QStringList result;
-    if (git_tag_list(&tags, repository) == 0) {
-        result.reserve(static_cast<int>(tags.count));
-        for (size_t i = 0; i < tags.count; ++i) {
-            result.append(QString::fromUtf8(tags.strings[i]));
-        }
-        git_strarray_dispose(&tags);
-    }
-
-    git_repository_free(repository);
-    return result;
+    return res.stdOut.split('\n', Qt::SkipEmptyParts);
 }
 
 bool canFastForward(const QString& repoPath, const QString& branch, const QString& remoteName) {
-    QMutexLocker locker(&g_gitMutex);
-    
-    git_repository *repository = nullptr;
-    int error = git_repository_open(&repository, repoPath.toLocal8Bit().constData());
-    if (error < 0) {
-        return false;
-    }
-    
-    // Get local branch
-    QString localBranchRef = QString("refs/heads/%1").arg(branch);
-    git_reference *localBranch = nullptr;
-    error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
-    if (error < 0) {
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Get remote branch
-    QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remoteName, branch);
-    git_reference *remoteBranch = nullptr;
-    error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
-    if (error < 0) {
-        git_reference_free(localBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Get commits
-    git_commit *localCommit = nullptr;
-    git_commit *remoteCommit = nullptr;
-    error = git_commit_lookup(&localCommit, repository, git_reference_target(localBranch));
-    if (error < 0) {
-        git_reference_free(localBranch);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
-    if (error < 0) {
-        git_commit_free(localCommit);
-        git_reference_free(localBranch);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Check if local is ancestor of remote (can fast-forward)
-    // This means the merge base of local and remote should be the local commit
-    git_oid mergeBase;
-    error = git_merge_base(&mergeBase, repository, git_commit_id(localCommit), git_commit_id(remoteCommit));
-    bool canFF = (error == 0) && git_oid_equal(git_commit_id(localCommit), &mergeBase);
-    
-    git_commit_free(localCommit);
-    git_commit_free(remoteCommit);
-    git_reference_free(localBranch);
-    git_reference_free(remoteBranch);
-    git_repository_free(repository);
-    
-    return canFF;
+    const QString localRef = QStringLiteral("refs/heads/%1").arg(branch);
+    const QString remoteRef = QStringLiteral("refs/remotes/%1/%2").arg(remoteName, branch);
+
+    // Local can fast-forward to remote iff local is an ancestor of remote.
+    // `merge-base --is-ancestor` exits 0 when true, 1 when false, other on error.
+    const GitResult res = runGit(repoPath,
+        {QStringLiteral("merge-base"), QStringLiteral("--is-ancestor"), localRef, remoteRef}, 10000);
+    return res.exitCode == 0;
 }
 
 bool rebaseBranch(const QString& repoPath, const QString& branch, const QString& remoteName, QString& errorMessage) {
-    QMutexLocker locker(&g_gitMutex);
-    
-    git_repository *repository = nullptr;
-    int error = git_repository_open(&repository, repoPath.toLocal8Bit().constData());
-    if (error < 0) {
-        errorMessage = getGitErrorMessage(error);
+    const QString remoteRef = QStringLiteral("refs/remotes/%1/%2").arg(remoteName, branch);
+
+    if (!runGit(repoPath, {QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("--quiet"), remoteRef}, 10000).ok()) {
+        errorMessage = QStringLiteral("Remote branch %1/%2 not found").arg(remoteName, branch);
         return false;
     }
-    
-    // Get remote branch reference
-    QString remoteBranchRef = QString("refs/remotes/%1/%2").arg(remoteName, branch);
-    git_reference *remoteBranch = nullptr;
-    error = git_reference_lookup(&remoteBranch, repository, remoteBranchRef.toLocal8Bit().constData());
-    if (error < 0) {
-        errorMessage = QString("Remote branch %1/%2 not found").arg(remoteName, branch);
-        git_repository_free(repository);
+
+    // Make sure the branch we're fast-forwarding is the checked-out one, so the
+    // working tree is updated to match (mirrors the previous behavior).
+    const GitResult current = runGit(repoPath, {QStringLiteral("rev-parse"), QStringLiteral("--abbrev-ref"), QStringLiteral("HEAD")}, 10000);
+    if (current.stdOut.trimmed() != branch) {
+        const GitResult checkout = runGit(repoPath, {QStringLiteral("checkout"), branch}, 30000);
+        if (!checkout.ok()) {
+            errorMessage = checkout.stdErr.trimmed().isEmpty()
+                               ? QStringLiteral("Failed to checkout %1").arg(branch)
+                               : checkout.stdErr.trimmed();
+            return false;
+        }
+    }
+
+    const GitResult merge = runGit(repoPath, {QStringLiteral("merge"), QStringLiteral("--ff-only"), remoteRef}, 30000);
+    if (!merge.ok()) {
+        errorMessage = merge.stdErr.trimmed().isEmpty()
+                           ? QStringLiteral("Fast-forward failed")
+                           : merge.stdErr.trimmed();
         return false;
     }
-    
-    // Get the remote commit
-    git_commit *remoteCommit = nullptr;
-    error = git_commit_lookup(&remoteCommit, repository, git_reference_target(remoteBranch));
-    if (error < 0) {
-        errorMessage = getGitErrorMessage(error);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Get the local branch reference
-    QString localBranchRef = QString("refs/heads/%1").arg(branch);
-    git_reference *localBranch = nullptr;
-    error = git_reference_lookup(&localBranch, repository, localBranchRef.toLocal8Bit().constData());
-    if (error < 0) {
-        errorMessage = QString("Local branch %1 not found").arg(branch);
-        git_commit_free(remoteCommit);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Perform the rebase by resetting to the remote branch (fast-forward)
-    // Since we've verified it can be fast-forwarded, we can safely reset
-    git_object *targetObj = nullptr;
-    error = git_reference_peel(&targetObj, remoteBranch, GIT_OBJECT_COMMIT);
-    if (error < 0) {
-        errorMessage = getGitErrorMessage(error);
-        git_reference_free(localBranch);
-        git_commit_free(remoteCommit);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Update the local branch to point to the remote commit
-    git_reference *updatedRef = nullptr;
-    error = git_reference_set_target(&updatedRef, localBranch, git_object_id(targetObj), "Rebase: fast-forward");
-    if (error < 0) {
-        errorMessage = getGitErrorMessage(error);
-        git_object_free(targetObj);
-        git_reference_free(localBranch);
-        git_commit_free(remoteCommit);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Checkout the updated branch
-    git_checkout_options checkoutOpts = GIT_CHECKOUT_OPTIONS_INIT;
-    checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE;
-    error = git_checkout_tree(repository, targetObj, &checkoutOpts);
-    if (error < 0) {
-        errorMessage = getGitErrorMessage(error);
-        git_reference_free(updatedRef);
-        git_object_free(targetObj);
-        git_reference_free(localBranch);
-        git_commit_free(remoteCommit);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    // Update HEAD to point to the branch
-    error = git_repository_set_head(repository, localBranchRef.toLocal8Bit().constData());
-    if (error < 0) {
-        errorMessage = getGitErrorMessage(error);
-        git_reference_free(updatedRef);
-        git_object_free(targetObj);
-        git_reference_free(localBranch);
-        git_commit_free(remoteCommit);
-        git_reference_free(remoteBranch);
-        git_repository_free(repository);
-        return false;
-    }
-    
-    git_reference_free(updatedRef);
-    git_object_free(targetObj);
-    git_reference_free(localBranch);
-    git_commit_free(remoteCommit);
-    git_reference_free(remoteBranch);
-    git_repository_free(repository);
-    
+
     return true;
 }
 

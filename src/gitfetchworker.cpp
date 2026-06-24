@@ -1,12 +1,11 @@
 #include "gitfetchworker.h"
 #include "gitutils.h"
-#include <git2.h>
-#include <QDir>
-#include <QFile>
 #include <QtConcurrent>
 #include <QFuture>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
@@ -14,26 +13,8 @@
 #include <QDebug>
 #include <chrono>
 #include <memory>
-#include <utility>
 
 namespace {
-// Payload handed to libgit2 fetch callbacks. Lets the callbacks reach the
-// worker (for credentials) and enforce an overall fetch deadline / cancellation.
-struct FetchCallbackPayload {
-    GitFetchWorker* worker;
-    const std::atomic<bool>* stopRequested;
-    std::chrono::steady_clock::time_point deadline;
-
-    bool shouldAbort() const {
-        return stopRequested->load() || std::chrono::steady_clock::now() >= deadline;
-    }
-};
-
-int abortIfNeeded(void* payload) {
-    auto* p = static_cast<FetchCallbackPayload*>(payload);
-    return (p && p->shouldAbort()) ? GIT_EUSER : 0;
-}
-
 // Shared aggregation state for the remotes of a single repository fetch. The
 // per-remote pool tasks and the watchdog all hold a shared_ptr to it; whichever
 // completes the set (or times out) first finalizes and emits fetchFinished.
@@ -58,7 +39,7 @@ GitFetchWorker::GitFetchWorker(QObject *parent)
     , m_connectionTimeoutSeconds(5) // Default 5 seconds
 {
     // Bound concurrency so a burst of repositories/remotes doesn't spawn an
-    // unbounded number of network threads, while still letting independent
+    // unbounded number of network processes, while still letting independent
     // remotes fetch in parallel.
     m_pool.setMaxThreadCount(qMax(4, QThread::idealThreadCount() * 2));
 }
@@ -82,17 +63,7 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
         return;
     }
 
-    // Apply the connection / server-side timeouts. These are libgit2 global
-    // options; serialize the write under the git mutex to avoid racing with
-    // other threads reading them mid-connect.
     const int timeoutSeconds = m_timeoutSeconds.load();
-    {
-        QMutexLocker locker(&g_gitMutex);
-        const int connectTimeoutMs = m_connectionTimeoutSeconds.load() * 1000;
-        git_libgit2_opts(GIT_OPT_SET_SERVER_CONNECT_TIMEOUT, connectTimeoutMs);
-        git_libgit2_opts(GIT_OPT_SET_SERVER_TIMEOUT, connectTimeoutMs);
-    }
-
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSeconds);
 
     auto state = std::make_shared<RepoFetchState>();
@@ -106,7 +77,7 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
         emit remoteStatusChanged(repo.name, remote.name, QStringLiteral("Queued"));
     }
 
-    // Dispatch each remote onto the bounded pool with its own handle so one
+    // Dispatch each remote onto the bounded pool with its own git process so one
     // slow/hung remote cannot block its siblings.
     for (const GitRemote& remote : repo.remotes) {
         const QString repoName = repo.name;
@@ -155,12 +126,10 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
         });
     }
 
-    // Watchdog: even if a remote hangs in a phase libgit2 can't interrupt (e.g.
-    // an SSH connect/auth stall, where the transfer callbacks never fire), the
-    // UI must not wait forever. This fires on the worker thread's event loop and
-    // finalizes the repository, marking any still-pending remotes as timed out.
-    // The orphaned fetch keeps running until libgit2 returns, then sees
-    // `finished` and quietly discards its result.
+    // Watchdog backstop: each remote process already self-terminates at the
+    // deadline / on a stall, but this guarantees the UI is finalized even in the
+    // unlikely event a process is slow to die. It marks any still-pending remotes
+    // as timed out and finalizes the repository.
     QTimer::singleShot(timeoutSeconds * 1000, this, [this, state]() {
         QString message;
         {
@@ -176,9 +145,7 @@ void GitFetchWorker::fetchRepository(const GitRepository& repo)
                     state->allSuccessful = false;
                 }
             }
-            message = QString("Fetch timed out after %1 seconds; %2 remote(s) still running in the background")
-                          .arg(state->timeoutSeconds)
-                          .arg(state->remoteNames.size() - state->completed.size());
+            message = QString("Fetch timed out after %1 seconds").arg(state->timeoutSeconds);
         }
         emit fetchFinished(state->repoName, false, message);
         // Remotes that completed before the deadline may still have delivered tags.
@@ -206,79 +173,76 @@ bool GitFetchWorker::fetchOneRemote(const QString& repoName, const QString& repo
 {
     emit remoteStatusChanged(repoName, remote.name, QStringLiteral("Fetching..."));
 
-    // Each task uses its own repository handle: libgit2 handles must not be
-    // shared across threads.
-    git_repository *repository = nullptr;
-    int error;
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_repository_open(&repository, repoPath.toLocal8Bit().constData());
+    // The "connection timeout" setting doubles as the no-output (stall) timeout:
+    // if git produces nothing for this long, we consider the remote stalled.
+    const int idleSeconds = qMax(1, m_connectionTimeoutSeconds.load());
+
+    QProcess proc;
+    // Merge stderr (where git writes --progress sideband) into stdout so any
+    // activity counts as liveness for stall detection.
+    proc.setProcessChannelMode(QProcess::MergedChannels);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
+    // Force SSH to be non-interactive and to bound its own connect phase, so a
+    // dead host fails fast instead of blocking in a socket read forever. This is
+    // the key behavior libgit2's SSH transport lacked.
+    QString sshCmd = env.value(QStringLiteral("GIT_SSH_COMMAND"));
+    if (sshCmd.isEmpty()) {
+        sshCmd = QStringLiteral("ssh");
     }
-    if (error < 0) {
+    sshCmd += QStringLiteral(" -o BatchMode=yes -o ConnectTimeout=%1").arg(idleSeconds);
+    env.insert(QStringLiteral("GIT_SSH_COMMAND"), sshCmd);
+    proc.setProcessEnvironment(env);
+
+    const QStringList args = {QStringLiteral("-C"), repoPath,
+                              QStringLiteral("fetch"), QStringLiteral("--progress"),
+                              remote.name};
+    proc.start(QStringLiteral("git"), args);
+    if (!proc.waitForStarted(5000)) {
         statusLabel = QStringLiteral("Error");
         return false;
     }
 
-    git_remote *git_remote = nullptr;
-    {
-        QMutexLocker locker(&g_gitMutex);
-        error = git_remote_lookup(&git_remote, repository, remote.name.toLocal8Bit().constData());
-        if (error < 0) {
-            // If the remote doesn't exist yet, create it.
-            error = git_remote_create(&git_remote, repository, remote.name.toLocal8Bit().constData(), remote.url.toLocal8Bit().constData());
+    auto lastActivity = std::chrono::steady_clock::now();
+    enum class AbortReason { None, Stop, Deadline, Idle } reason = AbortReason::None;
+
+    for (;;) {
+        // Wait for output in small slices so we can poll stop/deadline/idle even
+        // when git is quiet.
+        if (proc.waitForReadyRead(200)) {
+            const QByteArray chunk = proc.readAll();
+            if (!chunk.isEmpty()) {
+                lastActivity = std::chrono::steady_clock::now();
+            }
         }
+
+        if (proc.state() == QProcess::NotRunning) {
+            proc.readAll(); // drain any trailing output
+            break;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (m_stopRequested.load()) { reason = AbortReason::Stop; break; }
+        if (now >= deadline) { reason = AbortReason::Deadline; break; }
+        if (now - lastActivity >= std::chrono::seconds(idleSeconds)) { reason = AbortReason::Idle; break; }
     }
-    if (error < 0) {
-        {
-            QMutexLocker locker(&g_gitMutex);
-            git_repository_free(repository);
+
+    if (reason != AbortReason::None) {
+        proc.kill();
+        proc.waitForFinished(2000);
+        switch (reason) {
+            case AbortReason::Stop:     statusLabel = QStringLiteral("Cancelled"); break;
+            case AbortReason::Deadline: statusLabel = QStringLiteral("Timeout"); break;
+            case AbortReason::Idle:     statusLabel = QStringLiteral("Timeout"); break;
+            default: break;
         }
-        statusLabel = QStringLiteral("Error");
         return false;
     }
 
-    FetchCallbackPayload payload;
-    payload.worker = this;
-    payload.stopRequested = &m_stopRequested;
-    payload.deadline = deadline;
-
-    git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
-    fetch_opts.callbacks.credentials = [](git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload) -> int {
-        auto* cb = static_cast<FetchCallbackPayload*>(payload);
-        return cb->worker->sshKeyCallback(out, url, username_from_url, allowed_types, cb->worker);
-    };
-    fetch_opts.callbacks.transfer_progress = [](const git_indexer_progress*, void *payload) -> int {
-        return abortIfNeeded(payload);
-    };
-    fetch_opts.callbacks.sideband_progress = [](const char*, int, void *payload) -> int {
-        return abortIfNeeded(payload);
-    };
-    fetch_opts.callbacks.payload = &payload;
-    // Follow tags for the objects we download (the standard `git fetch` behavior),
-    // so new tags land locally and can be reported.
-    fetch_opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_AUTO;
-
-    error = GitUtils::fetchRemoteWithTimeout(git_remote, fetch_opts, m_connectionTimeoutSeconds.load());
-
-    bool success = false;
-    if (error < 0) {
-        if (std::chrono::steady_clock::now() >= deadline) {
-            statusLabel = QStringLiteral("Timeout");
-        } else if (error == GIT_EUSER || m_stopRequested.load()) {
-            statusLabel = QStringLiteral("Cancelled");
-        } else {
-            statusLabel = QStringLiteral("Error");
-        }
-    } else {
-        statusLabel = QStringLiteral("Success");
-        success = true;
-    }
-
-    {
-        QMutexLocker locker(&g_gitMutex);
-        git_remote_free(git_remote);
-        git_repository_free(repository);
-    }
+    proc.waitForFinished(2000);
+    const bool success = (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0);
+    statusLabel = success ? QStringLiteral("Success") : QStringLiteral("Error");
     return success;
 }
 
@@ -298,41 +262,4 @@ void GitFetchWorker::checkForNewTags(const QString& repoName, const QString& rep
     if (!newTags.isEmpty()) {
         emit newTagsFound(repoName, newTags);
     }
-}
-
-QString GitFetchWorker::getGitErrorMessage(int error) const
-{
-    return GitUtils::getGitErrorMessage(error);
-}
-
-int GitFetchWorker::sshKeyCallback(git_credential **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload)
-{
-    // Try SSH key authentication first
-    if (allowed_types & GIT_CREDENTIAL_SSH_KEY) {
-        // Use SSH agent if available
-        int error = git_credential_ssh_key_from_agent(out, username_from_url);
-        if (error == 0) {
-            return 0;
-        }
-
-        // Fall back to default SSH key locations
-        QString homeDir = QDir::homePath();
-        QStringList sshKeyPaths = {
-            homeDir + "/.ssh/id_rsa",
-            homeDir + "/.ssh/id_ed25519",
-            homeDir + "/.ssh/id_ecdsa",
-            homeDir + "/.ssh/id_dsa"
-        };
-
-        for (const QString& keyPath : sshKeyPaths) {
-            if (QFile::exists(keyPath)) {
-                error = git_credential_ssh_key_new(out, username_from_url, nullptr, keyPath.toLocal8Bit().constData(), nullptr);
-                if (error == 0) {
-                    return 0;
-                }
-            }
-        }
-    }
-
-    return GIT_EUSER; // User cancelled
 }

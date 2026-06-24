@@ -4,7 +4,6 @@
 #include <QSystemTrayIcon>
 #include <QMessageBox>
 #include <QIcon>
-#include <git2.h>
 
 int main(int argc, char *argv[])
 {

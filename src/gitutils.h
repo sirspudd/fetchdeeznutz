@@ -4,23 +4,44 @@
 #include "gitmodels.h"
 #include <QString>
 #include <QStringList>
-#include <QMutex>
-#include <git2.h>
-
-/**
- * Global mutex to serialize all libgit2 operations (libgit2 is not thread-safe)
- */
-extern QMutex g_gitMutex;
-
-/**
- * Custom error code for connection timeout
- */
-#define GIT_ETIMEOUT -1000
 
 namespace GitUtils {
 
 /**
- * Check if a path is a valid Git repository
+ * Result of running a git subprocess.
+ *  - exitCode: the process exit code, or one of the negative sentinels below.
+ *  - stdOut / stdErr: captured output (trimmed of trailing newline by callers
+ *    as needed).
+ */
+struct GitResult {
+    int exitCode = -1;
+    QString stdOut;
+    QString stdErr;
+
+    bool ok() const { return exitCode == 0; }
+};
+
+// Sentinel exit codes for runGit() failures that aren't a normal git exit.
+constexpr int GIT_PROCESS_FAILED_TO_START = -1001; // git binary missing / couldn't spawn
+constexpr int GIT_PROCESS_TIMED_OUT = -1002;       // exceeded the supplied timeout
+
+/**
+ * Run `git <args>` in the given working directory and capture its output.
+ *
+ * This shells out to the system git so it shares the user's SSH config, agent,
+ * credential helpers and known_hosts exactly like a manual `git` invocation.
+ * The child runs with GIT_TERMINAL_PROMPT=0 (and SSH BatchMode) so it can never
+ * block on an interactive credential/passphrase prompt.
+ *
+ * @param workingDir  repository working directory (passed via `git -C`).
+ * @param args        git arguments (without the leading "git").
+ * @param timeoutMs   hard wall-clock timeout; <=0 means no timeout. On timeout
+ *                    the process is killed and exitCode is GIT_PROCESS_TIMED_OUT.
+ */
+GitResult runGit(const QString& workingDir, const QStringList& args, int timeoutMs = 30000);
+
+/**
+ * Check if a path is a valid Git repository or worktree.
  */
 bool isRepositoryValid(const QString& path);
 
@@ -65,23 +86,14 @@ QList<GitRemote> getRepositoryRemotes(const QString& path);
 QString getRepositoryBranch(const QString& path);
 
 /**
- * Calculate commit counts (ahead/behind) for a remote
+ * Calculate commit counts (ahead/behind) for a remote, comparing the local
+ * branch against the remote-tracking ref. Writes the results into `remote`.
  */
-void calculateRemoteCommitCounts(git_repository* repository, GitRemote& remote, const QString& branch, const QString& repoName);
-
-/**
- * Get a human-readable error message from a libgit2 error code
- */
-QString getGitErrorMessage(int error);
-
-/**
- * Fetch from a remote with timeout (all operations protected by mutex)
- */
-int fetchRemoteWithTimeout(git_remote* git_remote, const git_fetch_options& fetch_opts, int timeoutSeconds);
+void calculateRemoteCommitCounts(const QString& repoPath, GitRemote& remote, const QString& branch, const QString& repoName);
 
 /**
  * List the shorthand names of all tags in a repository (e.g. "v1.2.0").
- * Returns an empty list if the repository can't be opened.
+ * Returns an empty list if the repository can't be read.
  */
 QStringList listTags(const QString& repoPath);
 
@@ -91,7 +103,8 @@ QStringList listTags(const QString& repoPath);
 bool canFastForward(const QString& repoPath, const QString& branch, const QString& remoteName);
 
 /**
- * Rebase the current branch against its upstream remote branch
+ * Fast-forward the given branch to its remote-tracking branch (updates the
+ * working tree). Returns false and sets errorMessage on failure.
  */
 bool rebaseBranch(const QString& repoPath, const QString& branch, const QString& remoteName, QString& errorMessage);
 

@@ -17,10 +17,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Concurrent)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Concurrent)
 
-# Find libgit2
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBGIT2 REQUIRED libgit2)
-
 set(PROJECT_SOURCES
         src/main.cpp
         src/gitmodels.cpp
@@ -68,9 +64,6 @@ else()
 endif()
 
 target_link_libraries(fetchdeeznutz PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent)
-target_include_directories(fetchdeeznutz PRIVATE ${LIBGIT2_INCLUDE_DIRS})
-target_link_libraries(fetchdeeznutz PRIVATE ${LIBGIT2_LIBRARIES})
-target_compile_options(fetchdeeznutz PRIVATE ${LIBGIT2_CFLAGS_OTHER})
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an

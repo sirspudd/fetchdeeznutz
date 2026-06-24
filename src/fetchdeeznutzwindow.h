@@ -41,9 +41,6 @@
 #include <QSettings>
 #include <QByteArray>
 
-// Forward declarations
-struct git_repository;
-
 class FetchDeeznutzWindow : public QMainWindow
 {
     Q_OBJECT

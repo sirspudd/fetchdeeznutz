@@ -99,7 +99,7 @@ The new logo transforms FetchDeezNutz from having an amateur appearance to looki
 - **Real-time Status**: View the status of each repository and fetch operations
 - **Activity Logging**: Comprehensive logging of all fetch operations with timestamps
 - **Configuration Persistence**: All settings are saved to a JSON configuration file
-- **libgit2 Integration**: Uses libgit2 library for fast, reliable Git operations without external dependencies
+- **System Git Integration**: Shells out to the system `git` for all operations, inheriting your SSH config, agent, and credential helpers exactly like a manual `git` invocation
 - **Directory Scanning**: Automatically discover and add all Git repositories in a directory tree
 - **Smart Repository Detection**: Recursively scans directories while avoiding common build/cache directories
 - **Multiple Remotes Support**: Fetch from all configured remotes (origin, upstream, fork, etc.) for each repository
@@ -113,8 +113,8 @@ The new logo transforms FetchDeezNutz from having an amateur appearance to looki
 
 ### Prerequisites
 - CMake 3.16 or higher
-- Qt 5 or Qt 6 with Widgets component
-- libgit2 development libraries
+- Qt 5 or Qt 6 with Widgets and Concurrent components
+- `git` available on PATH at runtime
 - C++ compiler with C++17 support
 
 ### Build Steps
@@ -204,7 +204,7 @@ The application stores its configuration in a JSON file located at:
 ## How It Works
 
 1. **Scheduled Fetching**: The application uses a QTimer to periodically check if any repositories need to be fetched based on their individual intervals
-2. **Git Operations**: Uses libgit2 library for direct Git operations without external process dependencies
+2. **Git Operations**: Shells out to the system `git` (each fetch runs as its own subprocess), so operations honor your `~/.ssh/config`, ssh-agent, and credential helpers. Stalled fetches are detected via overall and no-output (idle) timeouts and the offending process is killed
 3. **Multiple Remote Fetching**: For each repository, fetches from all configured remotes (origin, upstream, fork, etc.)
 4. **Repository Validation**: Only works with existing Git repositories - repositories must be cloned manually before adding to the application
 5. **Status Tracking**: Tracks the last fetch time and current status for each repository and each remote
@@ -225,10 +225,10 @@ The application stores its configuration in a JSON file located at:
 
 ## Troubleshooting
 
-- **libgit2 Not Found**: Install libgit2 development libraries:
-  - Ubuntu/Debian: `sudo apt install libgit2-dev`
-  - Arch Linux: `sudo pacman -S libgit2`
-  - Fedora: `sudo dnf install libgit2-devel`
+- **git Not Found**: Ensure `git` is installed and on your PATH (the app invokes the system `git`):
+  - Ubuntu/Debian: `sudo apt install git`
+  - Arch Linux: `sudo pacman -S git`
+  - Fedora: `sudo dnf install git`
 - **Repository Not Found**: Make sure the local path points to an existing Git repository that has been cloned manually
 - **Permission Errors**: Make sure the application has write access to the local repository paths
 - **Network Issues**: Check your internet connection and repository URLs
