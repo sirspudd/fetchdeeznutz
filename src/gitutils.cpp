@@ -2,6 +2,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -9,6 +11,77 @@
 #include <QDebug>
 
 namespace GitUtils {
+
+namespace {
+// Spawn the user's system shell as a login + interactive shell and capture the
+// environment it ends up with, so git runs with the same variables a terminal
+// the user opened would have (notably SSH agent / credential-helper setup done
+// in shell rc files). Falls back to the inherited environment on any failure.
+QProcessEnvironment resolveShellEnvironment() {
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+
+    QString shell = qEnvironmentVariable("SHELL");
+    QStringList shellArgs;
+    if (!shell.isEmpty()) {
+        // -l sources login files (.profile/.zprofile/...), -i sources
+        // interactive rc files (.bashrc/.zshrc/config.fish), which is where
+        // agent pooling typically lives.
+        shellArgs = {QStringLiteral("-l"), QStringLiteral("-i"),
+                     QStringLiteral("-c"), QStringLiteral("env -0")};
+    } else {
+        shell = QStringLiteral("/bin/sh");
+        shellArgs = {QStringLiteral("-c"), QStringLiteral("env -0")};
+    }
+
+    QProcess probe;
+    probe.start(shell, shellArgs);
+    if (!probe.waitForStarted(3000)) {
+        return env;
+    }
+    // Signal EOF on stdin so an interactive shell never blocks waiting for input.
+    probe.closeWriteChannel();
+    if (!probe.waitForFinished(5000)) {
+        probe.kill();
+        probe.waitForFinished(1000);
+        return env;
+    }
+    if (probe.exitStatus() != QProcess::NormalExit) {
+        return env;
+    }
+
+    const QByteArray out = probe.readAllStandardOutput();
+    if (out.isEmpty()) {
+        return env;
+    }
+
+    // env -0 is NUL-delimited, so values containing newlines survive intact.
+    const QList<QByteArray> entries = out.split('\0');
+    for (const QByteArray& entry : entries) {
+        const int eq = entry.indexOf('=');
+        if (eq <= 0) {
+            continue;
+        }
+        env.insert(QString::fromUtf8(entry.left(eq)),
+                   QString::fromUtf8(entry.mid(eq + 1)));
+    }
+    return env;
+}
+} // namespace
+
+QProcessEnvironment baseGitEnvironment() {
+    static QMutex mutex;
+    static QProcessEnvironment cached;
+    static bool initialized = false;
+
+    QMutexLocker lock(&mutex);
+    if (!initialized) {
+        cached = resolveShellEnvironment();
+        // git must never block on an interactive credential/passphrase prompt.
+        cached.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
+        initialized = true;
+    }
+    return cached;
+}
 
 GitResult runGit(const QString& workingDir, const QStringList& args, int timeoutMs) {
     GitResult result;
@@ -20,12 +93,9 @@ GitResult runGit(const QString& workingDir, const QStringList& args, int timeout
     fullArgs += args;
 
     QProcess proc;
-    // Inherit the user's environment (PATH, HOME, SSH_AUTH_SOCK, ...) so git
-    // behaves exactly like an interactive invocation, then layer on overrides
-    // that guarantee it can never block on a prompt.
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
-    proc.setProcessEnvironment(env);
+    // Run git with the user's resolved shell environment so it shares their SSH
+    // config/agent and credential helpers exactly like a manual invocation.
+    proc.setProcessEnvironment(baseGitEnvironment());
 
     proc.start(QStringLiteral("git"), fullArgs);
     if (!proc.waitForStarted(5000)) {

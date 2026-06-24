@@ -4,8 +4,25 @@
 #include "gitmodels.h"
 #include <QString>
 #include <QStringList>
+#include <QProcessEnvironment>
 
 namespace GitUtils {
+
+/**
+ * The environment git subprocesses should run with.
+ *
+ * Resolved once (then cached) by spawning the user's system shell as a
+ * login + interactive shell and snapshotting its environment, so anything the
+ * user configures in their shell rc/profile files -- in particular SSH agent
+ * pooling (SSH_AUTH_SOCK), credential helpers and PATH -- is present exactly as
+ * it would be in a terminal they opened themselves. This matters for
+ * desktop-launched instances, which otherwise never source those files.
+ *
+ * Shell-agnostic: it uses $SHELL (bash, zsh, fish, ...) and falls back to the
+ * inherited environment if the probe fails. GIT_TERMINAL_PROMPT=0 is layered on
+ * so git can never block on an interactive prompt.
+ */
+QProcessEnvironment baseGitEnvironment();
 
 /**
  * Result of running a git subprocess.
