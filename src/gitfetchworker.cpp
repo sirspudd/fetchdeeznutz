@@ -173,29 +173,42 @@ bool GitFetchWorker::fetchOneRemote(const QString& repoName, const QString& repo
 {
     emit remoteStatusChanged(repoName, remote.name, QStringLiteral("Fetching..."));
 
-    // The "connection timeout" setting doubles as the no-output (stall) timeout:
-    // if git produces nothing for this long, we consider the remote stalled.
-    const int idleSeconds = qMax(1, m_connectionTimeoutSeconds.load());
+    const int connectSeconds = qMax(1, m_connectionTimeoutSeconds.load());
 
     QProcess proc;
-    // Merge stderr (where git writes --progress sideband) into stdout so any
-    // activity counts as liveness for stall detection.
+    // Merge stderr (where git writes --progress sideband) into stdout so we can
+    // drain a single channel. We do NOT use output for stall detection anymore:
+    // doing so would kill an in-progress passphrase prompt (which is silent).
     proc.setProcessChannelMode(QProcess::MergedChannels);
 
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
-    // Force SSH to be non-interactive and to bound its own connect phase, so a
-    // dead host fails fast instead of blocking in a socket read forever. This is
-    // the key behavior libgit2's SSH transport lacked.
+    // Base = the user's resolved login/interactive shell environment (so SSH
+    // agent, askpass and PATH match a terminal they opened), with
+    // GIT_TERMINAL_PROMPT=0 already layered on. We deliberately do NOT set
+    // BatchMode: ssh must be allowed to prompt for a locked key's passphrase via
+    // whatever agent/askpass the user's session provides -- this is
+    // desktop-environment agnostic; we make no assumption about KDE/GNOME/etc.
+    // and simply don't suppress the mechanism the user already has configured.
+    QProcessEnvironment env = GitUtils::baseGitEnvironment();
     QString sshCmd = env.value(QStringLiteral("GIT_SSH_COMMAND"));
     if (sshCmd.isEmpty()) {
         sshCmd = QStringLiteral("ssh");
     }
-    sshCmd += QStringLiteral(" -o BatchMode=yes -o ConnectTimeout=%1").arg(idleSeconds);
+    // Stall handling happens at the transport layer instead of by watching
+    // output, so it never interferes with an interactive passphrase prompt:
+    //  - ConnectTimeout bounds the initial TCP connect (dead host fails fast);
+    //  - ServerAlive* makes ssh detect a stalled/dead connection AFTER it's
+    //    established (these keepalives only run post-auth, so they don't race a
+    //    human typing a passphrase) and exit on its own.
+    sshCmd += QStringLiteral(" -o ConnectTimeout=%1 -o ServerAliveInterval=%1 -o ServerAliveCountMax=3").arg(connectSeconds);
     env.insert(QStringLiteral("GIT_SSH_COMMAND"), sshCmd);
     proc.setProcessEnvironment(env);
 
+    // HTTP(S) analog of ssh keepalive death-detection: abort if throughput stays
+    // effectively dead (< 1 byte/s) for a sustained window.
+    const int httpStallSeconds = qMax(connectSeconds * 3, 30);
     const QStringList args = {QStringLiteral("-C"), repoPath,
+                              QStringLiteral("-c"), QStringLiteral("http.lowSpeedLimit=1"),
+                              QStringLiteral("-c"), QStringLiteral("http.lowSpeedTime=%1").arg(httpStallSeconds),
                               QStringLiteral("fetch"), QStringLiteral("--progress"),
                               remote.name};
     proc.start(QStringLiteral("git"), args);
@@ -204,17 +217,16 @@ bool GitFetchWorker::fetchOneRemote(const QString& repoName, const QString& repo
         return false;
     }
 
-    auto lastActivity = std::chrono::steady_clock::now();
-    enum class AbortReason { None, Stop, Deadline, Idle } reason = AbortReason::None;
+    // The overall deadline is the hard backstop (it also bounds how long a
+    // passphrase prompt may sit). Mid-flight network stalls are handled by the
+    // ssh/http options above, so we don't need a no-output timer here -- we just
+    // drain output so a chatty fetch can't block on a full pipe, and poll for
+    // cancellation / the deadline.
+    enum class AbortReason { None, Stop, Deadline } reason = AbortReason::None;
 
     for (;;) {
-        // Wait for output in small slices so we can poll stop/deadline/idle even
-        // when git is quiet.
         if (proc.waitForReadyRead(200)) {
-            const QByteArray chunk = proc.readAll();
-            if (!chunk.isEmpty()) {
-                lastActivity = std::chrono::steady_clock::now();
-            }
+            proc.readAll(); // drain; don't let a full pipe block git
         }
 
         if (proc.state() == QProcess::NotRunning) {
@@ -225,18 +237,13 @@ bool GitFetchWorker::fetchOneRemote(const QString& repoName, const QString& repo
         const auto now = std::chrono::steady_clock::now();
         if (m_stopRequested.load()) { reason = AbortReason::Stop; break; }
         if (now >= deadline) { reason = AbortReason::Deadline; break; }
-        if (now - lastActivity >= std::chrono::seconds(idleSeconds)) { reason = AbortReason::Idle; break; }
     }
 
     if (reason != AbortReason::None) {
         proc.kill();
         proc.waitForFinished(2000);
-        switch (reason) {
-            case AbortReason::Stop:     statusLabel = QStringLiteral("Cancelled"); break;
-            case AbortReason::Deadline: statusLabel = QStringLiteral("Timeout"); break;
-            case AbortReason::Idle:     statusLabel = QStringLiteral("Timeout"); break;
-            default: break;
-        }
+        statusLabel = (reason == AbortReason::Stop) ? QStringLiteral("Cancelled")
+                                                    : QStringLiteral("Timeout");
         return false;
     }
 

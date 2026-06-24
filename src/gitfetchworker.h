@@ -35,9 +35,11 @@ signals:
     void newTagsFound(const QString& repoName, const QStringList& tags);
 
 private:
-    // Fetch a single remote by shelling out to `git fetch`. The child process is
-    // killed if the overall deadline is exceeded, if it produces no output for
-    // longer than the idle timeout (stall detection), or if a stop is requested.
+    // Fetch a single remote by shelling out to `git fetch`. ssh is allowed to
+    // prompt for a locked key's passphrase (no BatchMode), so this behaves like a
+    // manual fetch; mid-flight stalls are bounded at the transport layer (ssh
+    // ConnectTimeout + keepalives, http low-speed limits). The child process is
+    // killed if the overall deadline is exceeded or if a stop is requested.
     // Emits the "Fetching..." transition; returns true on success and writes the
     // resulting status label ("Success", "Error", "Timeout", "Cancelled").
     bool fetchOneRemote(const QString& repoName, const QString& repoPath, const GitRemote& remote,
@@ -49,7 +51,7 @@ private:
     QThreadPool m_pool; // bounded pool so independent remote fetches run concurrently
     std::atomic<bool> m_stopRequested;
     std::atomic<int> m_timeoutSeconds;
-    std::atomic<int> m_connectionTimeoutSeconds; // doubles as the no-output (stall) timeout
+    std::atomic<int> m_connectionTimeoutSeconds; // ssh ConnectTimeout / keepalive interval
 };
 
 #endif // GITFETCHWORKER_H

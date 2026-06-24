@@ -204,7 +204,7 @@ The application stores its configuration in a JSON file located at:
 ## How It Works
 
 1. **Scheduled Fetching**: The application uses a QTimer to periodically check if any repositories need to be fetched based on their individual intervals
-2. **Git Operations**: Shells out to the system `git` (each fetch runs as its own subprocess), so operations honor your `~/.ssh/config`, ssh-agent, and credential helpers. Stalled fetches are detected via overall and no-output (idle) timeouts and the offending process is killed
+2. **Git Operations**: Shells out to the system `git` (each fetch runs as its own subprocess), so operations honor your `~/.ssh/config`, ssh-agent, askpass and credential helpers — including prompting for a locked key's passphrase exactly like a manual fetch (no `BatchMode`; desktop-environment agnostic). On startup it resolves your system shell's login/interactive environment (`$SHELL -l -i -c 'env -0'`, shell-agnostic) and runs git with it, so SSH agent pooling configured in your shell rc files works even when the app is launched from a desktop icon rather than a terminal. Stalls are bounded at the transport layer — ssh `ConnectTimeout` + keepalives (`ServerAliveInterval`/`ServerAliveCountMax`) for SSH and `http.lowSpeedLimit`/`http.lowSpeedTime` for HTTP — with an overall fetch deadline as the hard backstop; the offending process is killed
 3. **Multiple Remote Fetching**: For each repository, fetches from all configured remotes (origin, upstream, fork, etc.)
 4. **Repository Validation**: Only works with existing Git repositories - repositories must be cloned manually before adding to the application
 5. **Status Tracking**: Tracks the last fetch time and current status for each repository and each remote
